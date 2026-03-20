@@ -1,0 +1,40 @@
+# .cargo/config.toml — project-level Cargo configuration.
+#
+# These settings override or extend Cargo defaults for everyone who checks out
+# this repo.  They live here rather than in the user's global config so the
+# build is reproducible on any machine without extra setup steps.
+
+[build]
+# Always cross-compile for our target CPU: RISC-V 32-bit, integer + multiply/divide
+# + atomics + compressed instructions, bare-metal ELF (no OS ABI).
+# Developers don't need to pass --target on every invocation.
+target = "riscv32imac-unknown-none-elf"
+
+[target.riscv32imac-unknown-none-elf]
+# `cargo run` will invoke QEMU instead of trying to execute the ELF natively.
+# -machine virt    → the generic QEMU RISC-V board that matches our memory map
+# -nographic       → redirect serial output to the terminal (no GUI window)
+# -bios none       → skip OpenSBI; we own the machine from reset
+# -kernel <path>   → load our ELF directly into DRAM
+runner = "qemu-system-riscv32 -machine virt -nographic -bios none -kernel"
+
+# rust-lld is LLVM's linker, shipped with the Rust toolchain.  We use it
+# instead of the host's ld/gold because it understands RISC-V out of the box
+# and doesn't require a cross-compiled binutils installation.
+linker = "rust-lld"
+
+rustflags = [
+    # riscv-rt 0.12 puts link.x in its build output directory and adds that
+    # directory to the linker search path, but it does NOT pass -T link.x
+    # itself.  We have to request it here.  The linker resolves the filename
+    # through the search paths (riscv-rt's out dir + our kernel/ dir from
+    # build.rs), so no absolute path is needed.
+    # memory.x must come FIRST: it defines the REGION_* aliases that link.x
+    # references.  The linker processes -T scripts in order, so if link.x
+    # came first it would see undefined region names and fail immediately.
+    "-C", "link-arg=-Tmemory.x",
+
+    # link.x is riscv-rt's main linker script: section layout, weak handler
+    # symbols, BSS/data init stubs, etc.  It resolves REGION_* from memory.x.
+    "-C", "link-arg=-Tlink.x",
+]

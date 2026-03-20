@@ -1,0 +1,24 @@
+# rust-toolchain.toml — pins the exact Rust toolchain for the entire project.
+#
+# Why pin?  Nightly Rust can introduce breaking changes between releases.
+# Pinning to a specific date ensures that `cargo build` produces the same
+# binary on every developer machine and in CI, regardless of when they run it.
+#
+# To update the toolchain: bump the date below, run `rustup update`, and fix
+# any new warnings/errors that nightly introduced.  Do this as a deliberate PR
+# so the team can review any breakage together.
+[toolchain]
+channel = "nightly-2024-12-01"
+
+# Components we always need alongside the compiler:
+#   rust-src   — allows `cargo build -Zbuild-std` to recompile core/alloc for
+#                our target; also needed by rust-analyzer for no_std projects.
+#   llvm-tools — ships llvm-size, llvm-objdump, llvm-objcopy; used by
+#                size_report.sh and our GDB helper script.
+#   clippy     — linter; used in the clippy CI workflow.
+#   rustfmt    — formatter; keeps style consistent.
+components = ["rust-src", "llvm-tools", "clippy", "rustfmt"]
+
+# Pre-download the bare-metal RISC-V target so developers don't need to run
+# `rustup target add` manually.
+targets = ["riscv32imac-unknown-none-elf"]

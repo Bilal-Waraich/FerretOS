@@ -1,0 +1,18 @@
+# Workspace root for FerretOS.
+#
+# We use a Cargo workspace so that future crates (a bootloader shim, HAL libraries,
+# test harnesses, etc.) can share the same dependency lock-file and build cache.
+# Right now there's only one member — the kernel itself — but the structure is ready
+# to grow as we add drivers and user-space stubs in later sprints.
+[workspace]
+resolver = "2"
+members = ["kernel"]
+
+# Release profile tuned for size — lives at workspace root so it actually applies.
+# Cargo ignores profile settings in non-root package Cargo.toml files.
+[profile.release]
+opt-level = "z"      # Optimise for binary size over speed ("z" is stricter than "s")
+lto = true           # Link-Time Optimisation — dead-code elimination across all crates
+codegen-units = 1    # Required for LTO; also produces smaller, more predictable output
+panic = "abort"      # We supply our own panic handler; no unwinding machinery needed
+strip = false        # Keep symbols for llvm-size / GDB in CI
