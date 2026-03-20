@@ -1,0 +1,28 @@
+[package]
+name = "ferret"
+version = "0.1.0"
+edition = "2021"
+
+# This is a bare-metal binary — there is no OS underneath us, so we can't
+# link against std. The `no_std` attribute in main.rs enforces this at the
+# language level, but Cargo also needs to know so it doesn't pull in the
+# standard library's build artifacts.
+
+[[bin]]
+name = "ferret"
+path = "src/main.rs"
+
+[dependencies]
+# riscv-rt provides the low-level reset vector, stack pointer initialisation,
+# and the #[entry] macro that lets us write our kernel entry point in safe
+# Rust.  Version 0.12 is the first release that works cleanly with the
+# riscv32imac target without needing a custom linker script from scratch.
+riscv-rt = "0.12"
+
+# The `riscv` crate gives us typed accessors for CSRs (Control and Status
+# Registers) like mstatus, mie, mtvec, etc.  We'll need these when we wire
+# up interrupt handling in Sprint 1.
+riscv = "0.12"
+
+# Note: [profile.release] lives in the workspace root Cargo.toml.
+# Cargo ignores profile tables in non-root package manifests.
