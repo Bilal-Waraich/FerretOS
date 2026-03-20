@@ -1,0 +1,89 @@
+name: Build & Boot Test
+
+# Trigger on every push and pull request targeting main or dev.
+# We test both branches so PRs are validated before merge and so that
+# direct pushes to main (hotfixes) are also caught quickly.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  # The Rust target triple for our bare-metal RISC-V build.
+  TARGET: riscv32imac-unknown-none-elf
+  # Cache key prefix — bump this manually if you need to invalidate all caches.
+  CACHE_VERSION: v1
+
+jobs:
+  build-and-boot:
+    name: Build kernel and verify boot output
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the repository at the commit that triggered this run.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Install the pinned nightly toolchain, our cross-compilation target,
+      #    and the LLVM tools component that size_report.sh depends on.
+      #    The rust-toolchain.toml file at the repo root tells rustup exactly
+      #    which nightly date to use, so this step is deterministic.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          # Read the channel from rust-toolchain.toml so we don't duplicate it.
+          toolchain: nightly-2024-12-01
+          targets: ${{ env.TARGET }}
+          components: rust-src, llvm-tools, clippy, rustfmt
+
+      # 3. Cache the Cargo registry and compiled dependencies.
+      #    Without this, every CI run downloads and recompiles all crates from
+      #    scratch, which adds several minutes to the feedback loop.
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ env.CACHE_VERSION }}-cargo-${{ env.TARGET }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-cargo-${{ env.TARGET }}-
+
+      # 4. Install QEMU for RISC-V.  We use the system package rather than
+      #    building from source to keep CI fast.  qemu-system-misc provides
+      #    qemu-system-riscv32 on Ubuntu.
+      - name: Install QEMU (RISC-V)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-system-misc
+
+      # 5. Build the kernel in release mode.  The .cargo/config.toml sets the
+      #    default target and linker flags so we don't need extra arguments here.
+      - name: Build kernel (release)
+        run: cargo build --release
+
+      # 6. Run QEMU with a 5-second timeout and capture all serial output.
+      #    We check that the boot banner appears in the log to confirm the
+      #    kernel reached our entry point and the UART is working.
+      #
+      #    `timeout 5` sends SIGTERM to QEMU after 5 seconds; we treat that
+      #    exit code (124) as a normal termination since the kernel loops
+      #    forever by design.
+      # 6. Run the integration test script which boots QEMU, captures serial
+      #    output, and asserts all expected strings are present.
+      - name: Boot integration test
+        run: bash tests/integration/boot_test.sh
+
+      # 7. Install llvm-tools via rustup so size_report.sh can find llvm-size,
+      #    then run the report.  The script exits non-zero if flash or RAM
+      #    budgets are exceeded, which will fail this CI step.
+      - name: Run size budget report
+        run: |
+          # cargo-binutils provides `rust-size` which wraps llvm-size.
+          cargo install cargo-binutils --locked 2>/dev/null || true
+          rustup component add llvm-tools 2>/dev/null || true
+
+          bash scripts/size_report.sh

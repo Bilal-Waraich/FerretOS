@@ -1,0 +1,57 @@
+name: Clippy Lint
+
+# Run Clippy on every push and PR to main or dev.
+# We treat all Clippy warnings as errors (-D warnings) so that lint
+# debt never accumulates quietly — every warning must be fixed or
+# explicitly suppressed with a `#[allow(...)]` and a comment explaining why.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  TARGET: riscv32imac-unknown-none-elf
+  CACHE_VERSION: v1
+
+jobs:
+  clippy:
+    name: Clippy — deny warnings
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install the pinned nightly toolchain with the clippy component.
+      # nightly is required because some of our build configuration
+      # (e.g. build-std) relies on nightly-only features.
+      - name: Install Rust toolchain with Clippy
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2024-12-01
+          targets: ${{ env.TARGET }}
+          components: clippy, rust-src
+
+      # Cache Cargo registry to avoid re-downloading crates on every run.
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ env.CACHE_VERSION }}-clippy-${{ env.TARGET }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-clippy-${{ env.TARGET }}-
+
+      # Run Clippy on the kernel binary.
+      # We omit --all-targets because bare-metal no_std targets have no `test`
+      # harness crate — passing --all-targets would try to compile a test binary
+      # and fail with "can't find crate for `test`".  Linting the bin target is
+      # sufficient to catch all kernel source warnings.
+      # -- -D warnings promotes every warning to an error.
+      - name: Run Clippy
+        run: |
+          cargo clippy -- -D warnings
