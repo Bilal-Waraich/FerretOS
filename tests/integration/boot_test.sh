@@ -31,8 +31,8 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 
 assert_contains() {
-    local label="$1" pattern="$2" output="$3"
-    if echo "$output" | grep -qF "$pattern"; then
+    local label="$1" pattern="$2" file="$3"
+    if grep -qF "$pattern" "$file"; then
         green "  PASS  $label"
         PASS=$((PASS + 1))
     else
@@ -68,24 +68,25 @@ sleep "$TIMEOUT_SEC"
 kill "$QPID" 2>/dev/null
 wait "$QPID" 2>/dev/null || true
 
-BOOT_LOG=$(cat /tmp/ferret_boot_test.log)
+LOG=/tmp/ferret_boot_test.log
 
 echo ""
 echo "─── Serial output ────────────────────────────────────────────────────────"
-echo "$BOOT_LOG"
+head -40 "$LOG"
 echo "──────────────────────────────────────────────────────────────────────────"
 echo ""
 
 # ── Assertions ────────────────────────────────────────────────────────────────
 
 echo "Assertions:"
-assert_contains "boot banner"        "Ferret booting"       "$BOOT_LOG"
-assert_contains "kernel name+ver"    "FerretOS v"           "$BOOT_LOG"
-assert_contains "target line"        "riscv32imac"          "$BOOT_LOG"
-assert_contains "memory map printed" "Memory map"           "$BOOT_LOG"
-assert_contains "text start"         ".text start"          "$BOOT_LOG"
-assert_contains "stack top"          "stack top"            "$BOOT_LOG"
-assert_contains "idle message"       "Kernel idle"          "$BOOT_LOG"
+assert_contains "boot banner"        "Ferret booting"       "$LOG"
+assert_contains "kernel name+ver"    "FerretOS v"           "$LOG"
+assert_contains "target line"        "riscv32imac"          "$LOG"
+assert_contains "memory map printed" "Memory map"           "$LOG"
+assert_contains "text start"         ".text start"          "$LOG"
+assert_contains "stack top"          "stack top"            "$LOG"
+assert_contains "interrupts enabled" "Interrupts enabled"   "$LOG"
+assert_contains "timer fires"        "[TICK"                "$LOG"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 

@@ -1,138 +1,116 @@
-// FerretOS — kernel entry point (Sprint 0)
-//
-// #![no_std] tells the Rust compiler not to link the standard library.  In
-// a bare-metal environment there is no OS to provide file I/O, heap
-// allocation, threads, or any of the other things `std` wraps.  We only get
-// `core`, which is the truly portable subset of the Rust standard library.
+//! FerretOS kernel entry point.
 #![no_std]
-//
-// #![no_main] tells the compiler that we are not providing a conventional
-// `fn main()` that the C runtime will call.  Instead, riscv-rt's assembly
-// boot code will jump directly to our `#[entry]` function after setting up
-// the stack and zeroing BSS.
 #![no_main]
+#![feature(naked_functions)]
 
+pub mod clint;
+pub mod context;
 mod uart;
 mod panic;
 
-// The `riscv_rt::entry` attribute macro does two things:
-//   1. It renames our function to `_start_rust` in the generated object file.
-//   2. riscv-rt's assembly stub (`boot.S`) calls `_start_rust` after the
-//      low-level machine-mode initialisation is complete (stack pointer set,
-//      BSS zeroed, .data copied from flash to RAM).
-//
-// The function signature must be `fn() -> !` — it must never return, because
-// there is nothing to return to.  If we accidentally returned, execution would
-// fall into whatever happens to be in memory after our stack frame, which is
-// undefined behaviour on bare metal.
 use riscv_rt::entry;
 
-/// Kernel version information — intentionally kept as compile-time constants
-/// so they end up in .rodata (flash) and cost zero RAM.
 const KERNEL_NAME: &str = "FerretOS";
 const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Boot entry point.
+/// Boot entry point — called by riscv-rt after BSS zero-init and `.data` copy.
 ///
-/// This is the first Rust code that runs after riscv-rt initialises the
-/// processor state.  In Sprint 0 we:
-///   1. Print a boot banner over UART so we know the system came up.
-///   2. Print a few diagnostic lines (version, target, memory layout).
-///   3. Spin forever — no scheduler yet, nothing else to do.
-///
-/// Later sprints will replace the infinite loop with capability table setup,
-/// task spawning, and the microkernel event loop.
+/// Initialises UART diagnostics, arms the CLINT timer, enables machine-mode
+/// interrupts, then enters a counter loop that proves the interrupt path works
+/// (Issue #17).
 #[entry]
 fn kernel_main() -> ! {
-    // --- Boot banner -------------------------------------------------------
-    //
-    // This is the very first output the user sees.  We want it to be clear
-    // and unambiguous so that "did the kernel boot?" is answered immediately
-    // by looking at the serial log.  The trailing newline is intentional —
-    // some terminal emulators need it to flush the line buffer.
     uart::uart_puts("====================================\n");
     uart::uart_puts("  Ferret booting...\n");
     uart::uart_puts("====================================\n");
-
-    // --- Kernel information ------------------------------------------------
     uart::uart_puts(KERNEL_NAME);
     uart::uart_puts(" v");
     uart::uart_puts(KERNEL_VERSION);
-    uart::uart_puts(" — Sprint 0 (bare-metal bring-up)\n");
-
+    uart::uart_puts(" — Sprint 1 (interrupts + context)\n");
     uart::uart_puts("Target : riscv32imac-unknown-none-elf\n");
     uart::uart_puts("Machine: QEMU virt\n");
 
-    // Print a few key linker-defined symbols so we can verify the linker
-    // script worked and the kernel loaded at the right addresses.
-    //
-    // We only reference symbols that riscv-rt's link.x actually defines:
-    //   _stext       — start of .text (riscv-rt PROVIDE)
-    //   _sdata/_edata — bounds of .data (defined in link.x SECTIONS)
-    //   _sbss/_ebss   — bounds of .bss  (defined in link.x SECTIONS)
-    //   _stack_start  — top of stack    (riscv-rt PROVIDE)
-    //
-    // Note: _etext is NOT exported by riscv-rt 0.12's link.x, so we skip it.
-    {
-        extern "C" {
-            static _stext:       u8;
-            static _sdata:       u8;
-            static _edata:       u8;
-            static _sbss:        u8;
-            static _ebss:        u8;
-            static _stack_start: u8;
-        }
+    print_memory_map();
 
-        // SAFETY: We only read the *addresses* of these linker symbols, never
-        // dereference them as data.  riscv-rt guarantees they are set correctly
-        // before our entry function is called.
-        let (stext, sdata, edata, sbss, ebss, stack) = unsafe {
-            (
-                &_stext       as *const u8 as usize,
-                &_sdata       as *const u8 as usize,
-                &_edata       as *const u8 as usize,
-                &_sbss        as *const u8 as usize,
-                &_ebss        as *const u8 as usize,
-                &_stack_start as *const u8 as usize,
-            )
-        };
+    // --- Interrupt setup (Issues #14, #15) ----------------------------------
 
-        uart::uart_puts("Memory map:\n");
+    // Point mtvec at our trap entry stub.  Direct mode: bits[1:0] = 0 means
+    // all traps dispatch to the same handler address.
+    unsafe {
+        core::arch::asm!(
+            "la t0, __trap_entry",
+            "csrw mtvec, t0",
+        );
+    }
 
-        uart::uart_puts("  .text start : ");
-        uart::uart_print_hex(stext);
-        uart::uart_puts("\n");
+    // Arm the first timer tick before enabling interrupts so the first MTIP
+    // fires at a predictable time rather than immediately.
+    clint::schedule_tick(clint::TICK_CYCLES);
 
-        uart::uart_puts("  .data       : ");
-        uart::uart_print_hex(sdata);
-        uart::uart_puts(" .. ");
-        uart::uart_print_hex(edata);
-        uart::uart_puts(" (");
-        uart::uart_print_usize(edata - sdata);
-        uart::uart_puts(" bytes)\n");
-
-        uart::uart_puts("  .bss        : ");
-        uart::uart_print_hex(sbss);
-        uart::uart_puts(" .. ");
-        uart::uart_print_hex(ebss);
-        uart::uart_puts(" (");
-        uart::uart_print_usize(ebss - sbss);
-        uart::uart_puts(" bytes)\n");
-
-        uart::uart_puts("  stack top   : ");
-        uart::uart_print_hex(stack);
-        uart::uart_puts("\n");
+    // Enable the machine timer interrupt source (MTIE, mie[7]) then enable
+    // global machine-mode interrupts (MIE, mstatus[3]).  Reversing this order
+    // would open a brief window where global interrupts are on but MTIE is not
+    // yet set — harmless here but a bad habit for future critical sections.
+    // csrsi only accepts 5-bit immediates; MTIE (bit 7) and MIE (bit 3)
+    // exceed that, so we use csrs with a register-held mask instead.
+    unsafe {
+        core::arch::asm!(
+            "li   t0, 0x80",        // MTIE mask
+            "csrs mie, t0",         // set MTIE (mie[7])
+            "li   t0, 0x8",         // MIE mask
+            "csrs mstatus, t0",     // set MIE  (mstatus[3])
+            out("t0") _,
+        );
     }
 
     uart::uart_puts("====================================\n");
-    uart::uart_puts("Kernel idle — Sprint 1 coming soon.\n");
+    uart::uart_puts("Interrupts enabled. Running demo.\n");
     uart::uart_puts("====================================\n");
 
-    // Spin forever.  Without a scheduler there is nothing else to do.
-    // The loop body uses `wfi` (Wait For Interrupt) to avoid burning CPU
-    // cycles in QEMU unnecessarily.  We import it inline rather than adding a
-    // top-level `use` so the dependency is obvious at the call site.
+    // --- Demo task (Issue #17) ----------------------------------------------
+    // Increment a counter; every 100 000 iterations print the value.
+    // Timer ISR fires every 1 ms and prints "[TICK N]".
+    // Interleaved output proves that mret correctly resumes this loop.
+    let mut counter: u32 = 0;
     loop {
-        unsafe { core::arch::asm!("wfi") };
+        counter = counter.wrapping_add(1);
+        if counter % 100_000 == 0 {
+            uart::uart_puts("counter: ");
+            uart::uart_print_usize(counter as usize);
+            uart::uart_puts("\n");
+        }
     }
+}
+
+/// Print the linker-symbol memory map over UART.
+fn print_memory_map() {
+    extern "C" {
+        static _stext:       u8;
+        static _sdata:       u8;
+        static _edata:       u8;
+        static _sbss:        u8;
+        static _ebss:        u8;
+        static _stack_start: u8;
+    }
+
+    // SAFETY: Only the *addresses* of linker symbols are read, never
+    // the data they point to.  riscv-rt guarantees these are valid.
+    let (stext, sdata, edata, sbss, ebss, stack) = unsafe {
+        (
+            &_stext       as *const u8 as usize,
+            &_sdata       as *const u8 as usize,
+            &_edata       as *const u8 as usize,
+            &_sbss        as *const u8 as usize,
+            &_ebss        as *const u8 as usize,
+            &_stack_start as *const u8 as usize,
+        )
+    };
+
+    uart::uart_puts("Memory map:\n");
+    uart::uart_puts("  .text start : "); uart::uart_print_hex(stext);  uart::uart_puts("\n");
+    uart::uart_puts("  .data       : "); uart::uart_print_hex(sdata);  uart::uart_puts(" .. ");
+    uart::uart_print_hex(edata); uart::uart_puts(" ("); uart::uart_print_usize(edata - sdata); uart::uart_puts(" bytes)\n");
+    uart::uart_puts("  .bss        : "); uart::uart_print_hex(sbss);   uart::uart_puts(" .. ");
+    uart::uart_print_hex(ebss);  uart::uart_puts(" ("); uart::uart_print_usize(ebss - sbss);   uart::uart_puts(" bytes)\n");
+    uart::uart_puts("  stack top   : "); uart::uart_print_hex(stack);  uart::uart_puts("\n");
 }
