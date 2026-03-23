@@ -611,104 +611,104 @@ The following issues are ready to be created in the repository. Labels suggested
 
 ### Milestone 0: Foundations
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 1 | Set up Cargo workspace with `riscv32imac-unknown-none-elf` target | `tooling` | |
-| 2 | Write linker script `ferret.ld` for QEMU `virt` machine | `kernel` | |
-| 3 | Implement minimal UART driver (memory-mapped 16550) | `kernel` | |
-| 4 | Implement panic handler with UART output | `kernel` | |
-| 5 | Boot to "Ferret booting..." in QEMU | `kernel` | |
-| 6 | Write `run_qemu.sh` launch script | `tooling` | |
-| 7 | Write `size_report.sh` binary size checker | `tooling` | |
-| 8 | Set up GitHub Actions: build + QEMU boot check | `tooling` | |
-| 9 | Set up GitHub Actions: Clippy linting | `tooling` | |
-| 10 | Write README skeleton with thesis and architecture placeholder | `docs` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Set up Cargo workspace with `riscv32imac-unknown-none-elf` target | `tooling` | |
+| Write linker script `ferret.ld` for QEMU `virt` machine | `kernel` | |
+| Implement minimal UART driver (memory-mapped 16550) | `kernel` | |
+| Implement panic handler with UART output | `kernel` | |
+| Boot to "Ferret booting..." in QEMU | `kernel` | |
+| Write `run_qemu.sh` launch script | `tooling` | |
+| Write `size_report.sh` binary size checker | `tooling` | |
+| Set up GitHub Actions: build + QEMU boot check | `tooling` | |
+| Set up GitHub Actions: Clippy linting | `tooling` | |
+| Write README skeleton with thesis and architecture placeholder | `docs` | |
 
 ---
 
 ### Milestone 1: Kernel Core
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 11 | Define RISC-V trap frame struct (32 GPRs + CSRs) | `kernel` | |
-| 12 | Write `#[naked]` trap entry handler in assembly | `kernel` | |
-| 13 | Implement CLINT timer interface (read `mtime`, write `mtimecmp`) | `kernel` | |
-| 14 | Enable machine-mode timer interrupt (`mstatus`, `mie`, `mtvec`) | `kernel` | |
-| 15 | Write context save/restore routine in `switch.S` | `kernel` | |
-| 16 | Demonstrate single task interrupted and resumed correctly | `test` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Define RISC-V trap frame struct (32 GPRs + CSRs) | `kernel` | |
+| Write `#[naked]` trap entry handler in assembly | `kernel` | |
+| Implement CLINT timer interface (read `mtime`, write `mtimecmp`) | `kernel` | |
+| Enable machine-mode timer interrupt (`mstatus`, `mie`, `mtvec`) | `kernel` | |
+| Write context save/restore routine in `switch.S` | `kernel` | |
+| Demonstrate single task interrupted and resumed correctly | `test` | |
 
 ---
 
 ### Milestone 2: Memory Safety Layer
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 17 | Define `MemoryRegion<START, END>` with const generic bounds | `memory` | |
-| 18 | Implement compile-time non-overlap check for `MemoryRegion` | `memory` | |
-| 19 | Define `Stack<N>` with 16-byte alignment | `memory` | |
-| 20 | Define `TaskDescriptor` struct with memory and stack fields | `kernel` | |
-| 21 | Implement static `TaskRegistry`: fixed array of `TaskDescriptor` | `kernel` | |
-| 22 | Verify total static allocation ≤ 256KB in CI via `size_report.sh` | `tooling` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Define `MemoryRegion<START, END>` with const generic bounds | `memory` | |
+| Implement compile-time non-overlap check for `MemoryRegion` | `memory` | |
+| Define `Stack<N>` with 16-byte alignment | `memory` | |
+| Define `TaskDescriptor` struct with memory and stack fields | `kernel` | |
+| Implement static `TaskRegistry`: fixed array of `TaskDescriptor` | `kernel` | |
+| Verify total static allocation ≤ 256KB in CI via `size_report.sh` | `tooling` | |
 
 ---
 
 ### Milestone 3: Capability System
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 23 | Define ZST capability types: `UartCapability<N>`, `GpioCapability<PIN>` | `capability` | |
-| 24 | Define `ExclusiveCapability<T>` and `SharedCapability<T>` wrappers | `capability` | |
-| 25 | Implement boot-time capability conflict detector | `capability` | |
-| 26 | Halt with diagnostic on exclusive capability conflict | `capability` | |
-| 27 | Write unit tests for capability conflict detection | `test` | |
-| 28 | Add capability fields to `TaskDescriptor` | `capability` | |
-| 28a | *(Stretch)* Map `MemoryRegion` types to RISC-V PMP registers at boot | `capability` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Define ZST capability types: `UartCapability<N>`, `GpioCapability<PIN>` | `capability` | |
+| Define `ExclusiveCapability<T>` and `SharedCapability<T>` wrappers | `capability` | |
+| Implement boot-time capability conflict detector | `capability` | |
+| Halt with diagnostic on exclusive capability conflict | `capability` | |
+| Write unit tests for capability conflict detection | `test` | |
+| Add capability fields to `TaskDescriptor` | `capability` | |
+| *(Stretch)* Map `MemoryRegion` types to RISC-V PMP registers at boot | `capability` | |
 
 ---
 
 ### Milestone 4: Scheduler
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 29 | Define `TaskState` enum: `Ready`, `Running`, `Blocked`, `Suspended` | `scheduler` | |
-| 30 | Implement static priority queue (`[TaskDescriptor; MAX_TASKS]` max-heap) | `scheduler` | |
-| 31 | Implement CCG construction from `TaskRegistry` | `scheduler` | |
-| 32 | Implement `MaxInheritedPriority` computation (BFS over CCG) | `scheduler` | |
-| 33 | Integrate `MaxInheritedPriority` into scheduler preemption decision | `scheduler` | |
-| 34 | Implement preemptive fixed-priority scheduler with round-robin tie-breaking | `scheduler` | |
-| 35 | Write 3-task demo (H, M, L) demonstrating CA-PIP behaviour | `test` | |
-| 36 | Measure and log context switch latency via CLINT | `scheduler` | |
-| 36a | *(Stretch)* Shift CCG to Cargo build script; emit `MaxInheritedPriority` as `const` array | `scheduler` | |
-| 36b | Cross-validate `MaxInheritedPriority` against hand-computed SRP ceilings | `test` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Define `TaskState` enum: `Ready`, `Running`, `Blocked`, `Suspended` | `scheduler` | |
+| Implement static priority queue (`[TaskDescriptor; MAX_TASKS]` max-heap) | `scheduler` | |
+| Implement CCG construction from `TaskRegistry` | `scheduler` | |
+| Implement `MaxInheritedPriority` computation (BFS over CCG) | `scheduler` | |
+| Integrate `MaxInheritedPriority` into scheduler preemption decision | `scheduler` | |
+| Implement preemptive fixed-priority scheduler with round-robin tie-breaking | `scheduler` | |
+| Write 3-task demo (H, M, L) demonstrating CA-PIP behaviour | `test` | |
+| Measure and log context switch latency via CLINT | `scheduler` | |
+| *(Stretch)* Shift CCG to Cargo build script; emit `MaxInheritedPriority` as `const` array | `scheduler` | |
+| Cross-validate `MaxInheritedPriority` against hand-computed SRP ceilings | `test` | |
 
 ---
 
 ### Milestone 5: OML Integration
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 37 | Define OML schema for `Task` (priority, stack_size, memory, peripheral, deadline) | `oml` | |
-| 38 | Add OML as workspace submodule, pinned at commit | `oml` | |
-| 39 | Write `build.rs` to invoke OML transpiler on `tasks/*.oml` | `oml` | |
-| 40 | Define OML → Rust code generation template for `TaskDescriptor` | `oml` | |
-| 41 | Replace hand-written `TaskDescriptor`s with OML-generated equivalents | `oml` | |
-| 42 | Verify incremental rebuild works after adding new `.oml` file | `oml` | |
-| 43 | Write `docs/oml_schema.md` | `docs` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Define OML schema for `Task` (priority, stack_size, memory, peripheral, deadline) | `oml` | |
+| Add OML as workspace submodule, pinned at commit | `oml` | |
+| Write `build.rs` to invoke OML transpiler on `tasks/*.oml` | `oml` | |
+| Define OML → Rust code generation template for `TaskDescriptor` | `oml` | |
+| Replace hand-written `TaskDescriptor`s with OML-generated equivalents | `oml` | |
+| Verify incremental rebuild works after adding new `.oml` file | `oml` | |
+| Write `docs/oml_schema.md` | `docs` | |
 
 ---
 
 ### Milestone 6: Polish & Demo
 
-| # | Title | Label | Assignee |
-|---|---|---|---|
-| 44 | Write complete `README.md` with thesis, build instructions, demo | `docs` | |
-| 45 | Create architecture SVG diagram for README | `docs` | |
-| 46 | Write `docs/ccg_algorithm.md` with full algorithm, SRP cross-validation, and invariant argument | `docs` | |
-| 47 | Record QEMU demo showing CA-PIP 3-task scenario | `docs` | |
-| 48 | Enable LTO and `opt-level = "z"` in release profile | `tooling` | |
-| 49 | Tag `v0.1.0` release with `ferret.elf` binary | `tooling` | |
-| 50 | *(Stretch)* Port to ESP32-C3 physical target | `kernel` | |
-| 50a | *(Stretch)* Integrate WCET analysis tooling; CI fails if task WCET exceeds declared deadline | `tooling` | |
+| Title | Label | Assignee |
+|---|---|---|
+| Write complete `README.md` with thesis, build instructions, demo | `docs` | |
+| Create architecture SVG diagram for README | `docs` | |
+| Write `docs/ccg_algorithm.md` with full algorithm, SRP cross-validation, and invariant argument | `docs` | |
+| Record QEMU demo showing CA-PIP 3-task scenario | `docs` | |
+| Enable LTO and `opt-level = "z"` in release profile | `tooling` | |
+| Tag `v0.1.0` release with `ferret.elf` binary | `tooling` | |
+| *(Stretch)* Port to ESP32-C3 physical target | `kernel` | |
+| *(Stretch)* Integrate WCET analysis tooling; CI fails if task WCET exceeds declared deadline | `tooling` | |
 
 ---
 
