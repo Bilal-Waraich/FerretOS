@@ -1,10 +1,11 @@
-//! context — RISC-V machine-mode execution context.
+//! Machine-mode execution context — trap frame and entry/exit stubs.
 //!
-//! This module owns the `TrapFrame` type, which is the contract between the
-//! assembly trap entry stub and the Rust trap handler.  Every time the
-//! processor takes an exception or interrupt, the entry stub saves the current
-//! register state into a `TrapFrame` on the kernel stack and passes a pointer
-//! to it as the first argument of `trap_handler`.
+//! `TrapFrame` is the contract between the assembly trap entry stub and the
+//! Rust trap handler.  On every trap the stub saves all register state into a
+//! `TrapFrame` on the kernel stack and passes a pointer to `trap_handler`.
+
+pub mod switch;
+pub mod trap;
 
 /// The complete register state captured on every trap (exception or interrupt).
 ///
