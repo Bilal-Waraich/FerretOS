@@ -20,7 +20,7 @@ See [FERRET.md](FERRET.md) for the full design document.
 | Sprint | Goal | Status |
 |--------|------|--------|
 | 0 | Toolchain + QEMU boot | ✅ done |
-| 1 | Interrupts + context switch | 🔲 not started |
+| 1 | Interrupts + context switch | ✅ done |
 | 2 | Memory safety layer | 🔲 not started |
 | 3 | Capability system | 🔲 not started |
 | 4 | CA-PIP scheduler | 🔲 not started |
