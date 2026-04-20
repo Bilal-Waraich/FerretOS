@@ -3,6 +3,7 @@
 #![no_main]
 #![feature(naked_functions)]
 
+pub mod capability;
 pub mod clint;
 pub mod config;
 pub mod context;
@@ -86,6 +87,12 @@ fn kernel_main() -> ! {
     uart::uart_puts("Tasks registered: ");
     uart::uart_print_usize(count);
     uart::uart_puts("\n");
+
+    // --- Capability conflict check (Issues #28, #29) -----------------------
+    // Scan all registered tasks for exclusive capability conflicts before any
+    // task runs.  Halts permanently if a conflict is found.
+    capability::check_capability_conflicts(memory::registry());
+    uart::uart_puts("Capability check passed.\n");
 
     print_task_registry();
 
