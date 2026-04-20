@@ -4,20 +4,37 @@
 #![feature(naked_functions)]
 
 pub mod clint;
+pub mod config;
 pub mod context;
+pub mod memory;
 mod uart;
 mod panic;
 
+use memory::task::{TaskDescriptor, register_task};
 use riscv_rt::entry;
 
 const KERNEL_NAME: &str = "FerretOS";
 const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// ---------------------------------------------------------------------------
+// Compile-time overlap check for the two demo task memory regions.
+// If the ranges were ever edited to overlap this becomes a build error.
+// ---------------------------------------------------------------------------
+const _: () = memory::assert_no_overlap::<
+    0x8008_1000, 0x8008_2000,   // task 0: 4 KB
+    0x8008_2000, 0x8008_3000,   // task 1: 4 KB
+>();
+
+// Statically allocated stacks for the two demo tasks (Sprint 2 demo).
+// These live in .bss and are zero-initialised before kernel_main runs.
+static mut STACK_TASK0: memory::Stack<4096> = memory::Stack::new();
+static mut STACK_TASK1: memory::Stack<4096> = memory::Stack::new();
+
 /// Boot entry point — called by riscv-rt after BSS zero-init and `.data` copy.
 ///
-/// Initialises UART diagnostics, arms the CLINT timer, enables machine-mode
-/// interrupts, then enters a counter loop that proves the interrupt path works
-/// (Issue #17).
+/// Initialises UART diagnostics, registers demo tasks, arms the CLINT timer,
+/// enables machine-mode interrupts, then enters a counter loop that proves
+/// the interrupt path works (Issue #17).
 #[entry]
 fn kernel_main() -> ! {
     uart::uart_puts("====================================\n");
@@ -26,11 +43,51 @@ fn kernel_main() -> ! {
     uart::uart_puts(KERNEL_NAME);
     uart::uart_puts(" v");
     uart::uart_puts(KERNEL_VERSION);
-    uart::uart_puts(" — Sprint 1 (interrupts + context)\n");
+    uart::uart_puts(" — Sprint 2 (memory + registry)\n");
     uart::uart_puts("Target : riscv32imac-unknown-none-elf\n");
     uart::uart_puts("Machine: QEMU virt\n");
 
     print_memory_map();
+
+    // --- Task registration (Issues #22, #23) --------------------------------
+    // Interrupts are not yet enabled; this is the safe single-threaded boot
+    // window for populating TASK_REGISTRY.
+    //
+    // addr_of! gives the base address of each stack buffer without creating a
+    // Rust reference to the mutable static (which is UB-prone under the Rust
+    // 2024 static-mut-refs rules).
+    // SAFETY: boot path, single-threaded, interrupts not yet enabled.
+    let (stack0_base, stack1_base) = unsafe {
+        (
+            core::ptr::addr_of!(STACK_TASK0) as usize,
+            core::ptr::addr_of!(STACK_TASK1) as usize,
+        )
+    };
+
+    register_task(TaskDescriptor::new(
+        0,              // id
+        2,              // priority (higher = more important)
+        stack0_base,
+        4096,
+        0x8008_1000,    // memory_start
+        0x8008_2000,    // memory_end
+    ));
+
+    register_task(TaskDescriptor::new(
+        1,              // id
+        1,              // priority
+        stack1_base,
+        4096,
+        0x8008_2000,    // memory_start
+        0x8008_3000,    // memory_end
+    ));
+
+    let count = memory::task_count();
+    uart::uart_puts("Tasks registered: ");
+    uart::uart_print_usize(count);
+    uart::uart_puts("\n");
+
+    print_task_registry();
 
     // --- Interrupt setup (Issues #14, #15) ----------------------------------
 
@@ -67,7 +124,6 @@ fn kernel_main() -> ! {
     uart::uart_puts("Interrupts enabled. Running demo.\n");
     uart::uart_puts("====================================\n");
 
-    // --- Demo task (Issue #17) ----------------------------------------------
     // Increment a counter; every 100 000 iterations print the value.
     // Timer ISR fires every 1 ms and prints "[TICK N]".
     // Interleaved output proves that mret correctly resumes this loop.
@@ -79,6 +135,25 @@ fn kernel_main() -> ! {
             uart::uart_print_usize(counter as usize);
             uart::uart_puts("\n");
         }
+    }
+}
+
+/// Print the contents of the task registry over UART.
+fn print_task_registry() {
+    let reg = memory::registry();
+    uart::uart_puts("Task registry:\n");
+    for task in reg.iter().flatten() {
+        uart::uart_puts("  task ");
+        uart::uart_print_usize(task.id as usize);
+        uart::uart_puts("  pri=");
+        uart::uart_print_usize(task.priority as usize);
+        uart::uart_puts("  stack_base=");
+        uart::uart_print_hex(task.stack_base);
+        uart::uart_puts("  mem=[");
+        uart::uart_print_hex(task.memory_start);
+        uart::uart_puts(", ");
+        uart::uart_print_hex(task.memory_end);
+        uart::uart_puts(")\n");
     }
 }
 
