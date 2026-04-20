@@ -56,14 +56,9 @@ fn kernel_main() -> ! {
     //
     // addr_of! gives the base address of each stack buffer without creating a
     // Rust reference to the mutable static (which is UB-prone under the Rust
-    // 2024 static-mut-refs rules).
-    // SAFETY: boot path, single-threaded, interrupts not yet enabled.
-    let (stack0_base, stack1_base) = unsafe {
-        (
-            core::ptr::addr_of!(STACK_TASK0) as usize,
-            core::ptr::addr_of!(STACK_TASK1) as usize,
-        )
-    };
+    // 2024 static-mut-refs rules).  addr_of! itself is safe.
+    let stack0_base = core::ptr::addr_of!(STACK_TASK0) as usize;
+    let stack1_base = core::ptr::addr_of!(STACK_TASK1) as usize;
 
     register_task(TaskDescriptor::new(
         0,              // id

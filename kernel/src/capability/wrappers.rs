@@ -35,6 +35,12 @@ impl<T> ExclusiveCapability<T> {
     }
 }
 
+impl<T> Default for ExclusiveCapability<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A shared, cloneable capability for peripheral `T`.
 ///
 /// Multiple tasks may hold simultaneous `SharedCapability<T>` tokens,

@@ -115,6 +115,10 @@ impl TaskDescriptor {
     }
 
     /// Construct a descriptor with explicit capability masks.
+    // Eight arguments is one over the clippy default but a const fn cannot
+    // use a builder pattern, and splitting the signature would obscure the
+    // atomic nature of task construction.
+    #[allow(clippy::too_many_arguments)]
     pub const fn with_capabilities(
         id: u8,
         priority: u8,

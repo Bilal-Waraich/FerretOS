@@ -62,7 +62,13 @@ fn report_conflict_and_halt(cap_id: usize, task_a: u8, task_b: u8) -> ! {
         uart::uart_print_usize(task_b as usize);
         uart::uart_puts("\n");
         uart::uart_puts("System halted. Fix capability declarations and reboot.\n");
-        loop {}
+        // Spin with wfi so the core yields to any pending interrupt rather than
+        // burning power, while still never returning.
+        loop {
+            // SAFETY: wfi is always safe to execute in M-mode; we are halting
+            // intentionally after a fatal capability conflict.
+            unsafe { core::arch::asm!("wfi") };
+        }
     }
     #[cfg(test)]
     panic!(
@@ -86,7 +92,11 @@ fn report_out_of_range_and_halt(cap_id: usize, task_id: u8) -> ! {
         uart::uart_print_usize(task_id as usize);
         uart::uart_puts("\n");
         uart::uart_puts("System halted. Fix capability declarations and reboot.\n");
-        loop {}
+        loop {
+            // SAFETY: wfi is always safe to execute in M-mode; we are halting
+            // intentionally after a fatal configuration error.
+            unsafe { core::arch::asm!("wfi") };
+        }
     }
     #[cfg(test)]
     panic!(
