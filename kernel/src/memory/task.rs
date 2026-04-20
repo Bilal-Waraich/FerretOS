@@ -70,10 +70,24 @@ pub struct TaskDescriptor {
 
     /// End address of the task's private memory region (exclusive).
     pub memory_end: usize,
+
+    /// Bitmask of exclusive peripheral IDs held by this task.
+    ///
+    /// Bit `i` set means this task holds exclusive ownership of peripheral `i`.
+    /// The boot-time conflict detector (Sprint 3) checks that no two tasks share
+    /// the same set bit.  The CCG builder (Sprint 4) reads this mask to create
+    /// contention edges.
+    pub exclusive_cap_mask: u32,
+
+    /// Bitmask of shared peripheral IDs held by this task.
+    ///
+    /// Bit `i` set means this task holds shared (read-only) access to
+    /// peripheral `i`.  Shared access does not create CCG edges.
+    pub shared_cap_mask: u32,
 }
 
 impl TaskDescriptor {
-    /// Construct a new descriptor.
+    /// Construct a new descriptor with no capabilities held.
     ///
     /// `stack_ptr` is initialised to `stack_base + stack_size` (top of
     /// the stack), which is the correct initial value for a RISC-V task
@@ -95,7 +109,47 @@ impl TaskDescriptor {
             stack_size,
             memory_start,
             memory_end,
+            exclusive_cap_mask: 0,
+            shared_cap_mask: 0,
         }
+    }
+
+    /// Construct a descriptor with explicit capability masks.
+    pub const fn with_capabilities(
+        id: u8,
+        priority: u8,
+        stack_base: usize,
+        stack_size: usize,
+        memory_start: usize,
+        memory_end: usize,
+        exclusive_cap_mask: u32,
+        shared_cap_mask: u32,
+    ) -> Self {
+        TaskDescriptor {
+            id,
+            priority,
+            state: TaskState::Ready,
+            stack_ptr: stack_base + stack_size,
+            stack_base,
+            stack_size,
+            memory_start,
+            memory_end,
+            exclusive_cap_mask,
+            shared_cap_mask,
+        }
+    }
+
+    /// Iterate over exclusive peripheral IDs held by this task.
+    ///
+    /// Yields each bit index `i` where `exclusive_cap_mask & (1 << i) != 0`.
+    /// Time complexity: O(MAX_PERIPHERALS) = O(32).
+    pub fn exclusive_capabilities(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..32).filter(move |&i| self.exclusive_cap_mask & (1 << i) != 0)
+    }
+
+    /// Iterate over shared peripheral IDs held by this task.
+    pub fn shared_capabilities(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..32).filter(move |&i| self.shared_cap_mask & (1 << i) != 0)
     }
 }
 
