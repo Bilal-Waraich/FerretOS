@@ -8,6 +8,7 @@ pub mod clint;
 pub mod config;
 pub mod context;
 pub mod memory;
+pub mod scheduler;
 mod uart;
 mod panic;
 
@@ -18,18 +19,41 @@ const KERNEL_NAME: &str = "FerretOS";
 const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ---------------------------------------------------------------------------
-// Compile-time overlap check for the two demo task memory regions.
-// If the ranges were ever edited to overlap this becomes a build error.
+// Compile-time overlap check for the three CA-PIP demo task memory regions.
 // ---------------------------------------------------------------------------
 const _: () = memory::assert_no_overlap::<
-    0x8008_1000, 0x8008_2000,   // task 0: 4 KB
-    0x8008_2000, 0x8008_3000,   // task 1: 4 KB
+    0x8008_1000, 0x8008_2000,   // task L: 4 KB
+    0x8008_2000, 0x8008_3000,   // task M: 4 KB
+>();
+const _: () = memory::assert_no_overlap::<
+    0x8008_2000, 0x8008_3000,   // task M: 4 KB
+    0x8008_3000, 0x8008_4000,   // task H: 4 KB
 >();
 
-// Statically allocated stacks for the two demo tasks (Sprint 2 demo).
-// These live in .bss and are zero-initialised before kernel_main runs.
-static mut STACK_TASK0: memory::Stack<4096> = memory::Stack::new();
-static mut STACK_TASK1: memory::Stack<4096> = memory::Stack::new();
+// ---------------------------------------------------------------------------
+// CA-PIP 3-task demo (Issue #40)
+//
+// Peripheral bitmasks:
+//   UART0 = bit 0 (peripheral ID 0)
+//
+// Task L (priority 1): holds UART0 exclusively, does slow work
+// Task M (priority 2): CPU-bound, no shared caps with L or H
+// Task H (priority 3): requires UART0, prints timestamps
+//
+// Expected CA-PIP behaviour:
+//   MIP(L) = max(H.priority) = 3  → L.effective_priority = 3
+//   L is NOT preempted by M (eff_pri 3 > M.priority 2)
+//   H runs immediately when L releases UART0
+// ---------------------------------------------------------------------------
+
+/// Peripheral bit for UART0.
+const UART0_BIT: u32 = 1 << 0;
+
+// Statically allocated stacks for the three demo tasks.
+// Each Stack<4096> lives in .bss and is zero-initialised before kernel_main.
+static mut STACK_TASK_L: memory::Stack<4096> = memory::Stack::new();
+static mut STACK_TASK_M: memory::Stack<4096> = memory::Stack::new();
+static mut STACK_TASK_H: memory::Stack<4096> = memory::Stack::new();
 
 /// Boot entry point — called by riscv-rt after BSS zero-init and `.data` copy.
 ///
@@ -44,38 +68,64 @@ fn kernel_main() -> ! {
     uart::uart_puts(KERNEL_NAME);
     uart::uart_puts(" v");
     uart::uart_puts(KERNEL_VERSION);
-    uart::uart_puts(" — Sprint 2 (memory + registry)\n");
+    uart::uart_puts(" — Sprint 4 (CA-PIP scheduler)\n");
     uart::uart_puts("Target : riscv32imac-unknown-none-elf\n");
     uart::uart_puts("Machine: QEMU virt\n");
 
     print_memory_map();
 
-    // --- Task registration (Issues #22, #23) --------------------------------
+    // --- Task registration (Issues #22, #23, #40) ---------------------------
     // Interrupts are not yet enabled; this is the safe single-threaded boot
     // window for populating TASK_REGISTRY.
     //
+    // CA-PIP 3-task demo:
+    //   L (id=0, pri=1): holds UART0 exclusively, does slow work
+    //   M (id=1, pri=2): CPU-bound, no capability contention
+    //   H (id=2, pri=3): requires UART0, prints timestamps
+    //
     // addr_of! gives the base address of each stack buffer without creating a
-    // Rust reference to the mutable static (which is UB-prone under the Rust
-    // 2024 static-mut-refs rules).  addr_of! itself is safe.
-    let stack0_base = core::ptr::addr_of!(STACK_TASK0) as usize;
-    let stack1_base = core::ptr::addr_of!(STACK_TASK1) as usize;
+    // Rust reference to the mutable static (UB-prone under Rust 2024).
+    let stack_l_base = core::ptr::addr_of!(STACK_TASK_L) as usize;
+    let stack_m_base = core::ptr::addr_of!(STACK_TASK_M) as usize;
+    let stack_h_base = core::ptr::addr_of!(STACK_TASK_H) as usize;
 
-    register_task(TaskDescriptor::new(
+    // Task L: priority 1, holds UART0 exclusively.
+    register_task(TaskDescriptor::with_capabilities(
         0,              // id
-        2,              // priority (higher = more important)
-        stack0_base,
+        1,              // base priority
+        stack_l_base,
         4096,
         0x8008_1000,    // memory_start
         0x8008_2000,    // memory_end
+        UART0_BIT,      // exclusive_cap_mask: holds UART0
+        0,              // shared_cap_mask
+        0,              // required_cap_mask
     ));
 
-    register_task(TaskDescriptor::new(
+    // Task M: priority 2, CPU-bound, no capabilities.
+    register_task(TaskDescriptor::with_capabilities(
         1,              // id
-        1,              // priority
-        stack1_base,
+        2,              // base priority
+        stack_m_base,
         4096,
         0x8008_2000,    // memory_start
         0x8008_3000,    // memory_end
+        0,              // exclusive_cap_mask
+        0,              // shared_cap_mask
+        0,              // required_cap_mask
+    ));
+
+    // Task H: priority 3, requires UART0.
+    register_task(TaskDescriptor::with_capabilities(
+        2,              // id
+        3,              // base priority
+        stack_h_base,
+        4096,
+        0x8008_3000,    // memory_start
+        0x8008_4000,    // memory_end
+        0,              // exclusive_cap_mask: H does not hold UART0 yet
+        0,              // shared_cap_mask
+        UART0_BIT,      // required_cap_mask: H needs UART0
     ));
 
     let count = memory::task_count();
@@ -88,6 +138,12 @@ fn kernel_main() -> ! {
     // task runs.  Halts permanently if a conflict is found.
     capability::check_capability_conflicts(memory::registry());
     uart::uart_puts("Capability check passed.\n");
+
+    // --- Scheduler init (Issues #35, #36, #37, #38, #39) --------------------
+    // Build CCG, compute MIP for all tasks, populate ready queue.
+    // Must run before interrupts are enabled.
+    scheduler::init();
+    uart::uart_puts("Scheduler initialised.\n");
 
     print_task_registry();
 
@@ -147,10 +203,16 @@ fn print_task_registry() {
     for task in reg.iter().flatten() {
         uart::uart_puts("  task ");
         uart::uart_print_usize(task.id as usize);
-        uart::uart_puts("  pri=");
+        uart::uart_puts("  base_pri=");
         uart::uart_print_usize(task.priority as usize);
-        uart::uart_puts("  stack_base=");
-        uart::uart_print_hex(task.stack_base);
+        uart::uart_puts("  mip=");
+        uart::uart_print_usize(task.max_inherited_priority as usize);
+        uart::uart_puts("  eff_pri=");
+        uart::uart_print_usize(task.effective_priority() as usize);
+        uart::uart_puts("  excl_caps=0x");
+        uart::uart_print_hex(task.exclusive_cap_mask as usize);
+        uart::uart_puts("  req_caps=0x");
+        uart::uart_print_hex(task.required_cap_mask as usize);
         uart::uart_puts("  mem=[");
         uart::uart_print_hex(task.memory_start);
         uart::uart_puts(", ");
