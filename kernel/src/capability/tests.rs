@@ -18,6 +18,7 @@ mod tests {
             0x2000_1000, // memory_end   (dummy)
             exclusive,
             shared,
+            0,           // required_cap_mask
         )
     }
 

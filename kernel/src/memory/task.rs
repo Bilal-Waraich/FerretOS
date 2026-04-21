@@ -84,6 +84,22 @@ pub struct TaskDescriptor {
     /// Bit `i` set means this task holds shared (read-only) access to
     /// peripheral `i`.  Shared access does not create CCG edges.
     pub shared_cap_mask: u32,
+
+    /// Bitmask of peripheral IDs this task requires but does not yet hold.
+    ///
+    /// Used by the CCG builder (Sprint 4) to construct contention edges:
+    /// an edge L → H is added when `L.exclusive_cap_mask & H.required_cap_mask != 0`,
+    /// meaning L holds a peripheral that H needs.  This is separate from
+    /// `exclusive_cap_mask` so the boot-time conflict detector does not
+    /// falsely flag a holder–waiter pair as a double-claim.
+    pub required_cap_mask: u32,
+
+    /// Maximum priority inherited via the CCG (computed once at boot).
+    ///
+    /// Set by [`crate::scheduler::compute_max_inherited_priorities`] to the
+    /// highest base priority among all tasks reachable from this task via BFS
+    /// over the CCG.  `effective_priority = max(priority, max_inherited_priority)`.
+    pub max_inherited_priority: u8,
 }
 
 impl TaskDescriptor {
@@ -111,11 +127,13 @@ impl TaskDescriptor {
             memory_end,
             exclusive_cap_mask: 0,
             shared_cap_mask: 0,
+            required_cap_mask: 0,
+            max_inherited_priority: 0,
         }
     }
 
     /// Construct a descriptor with explicit capability masks.
-    // Eight arguments is one over the clippy default but a const fn cannot
+    // Nine arguments exceeds clippy's default limit (7) but a const fn cannot
     // use a builder pattern, and splitting the signature would obscure the
     // atomic nature of task construction.
     #[allow(clippy::too_many_arguments)]
@@ -128,6 +146,7 @@ impl TaskDescriptor {
         memory_end: usize,
         exclusive_cap_mask: u32,
         shared_cap_mask: u32,
+        required_cap_mask: u32,
     ) -> Self {
         TaskDescriptor {
             id,
@@ -140,6 +159,8 @@ impl TaskDescriptor {
             memory_end,
             exclusive_cap_mask,
             shared_cap_mask,
+            required_cap_mask,
+            max_inherited_priority: 0,
         }
     }
 
@@ -154,6 +175,19 @@ impl TaskDescriptor {
     /// Iterate over shared peripheral IDs held by this task.
     pub fn shared_capabilities(&self) -> impl Iterator<Item = usize> + '_ {
         (0..32).filter(move |&i| self.shared_cap_mask & (1 << i) != 0)
+    }
+
+    /// Iterate over peripheral IDs required (but not yet held) by this task.
+    pub fn required_capabilities(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..32).filter(move |&i| self.required_cap_mask & (1 << i) != 0)
+    }
+
+    /// Effective priority for CA-PIP scheduling.
+    ///
+    /// Returns `max(priority, max_inherited_priority)`.  Both fields are `u8`
+    /// so the comparison is a single instruction; no heap allocation required.
+    pub fn effective_priority(&self) -> u8 {
+        self.priority.max(self.max_inherited_priority)
     }
 }
 
@@ -225,4 +259,21 @@ pub fn registry() -> &'static [Option<TaskDescriptor>; MAX_TASKS] {
 pub fn task_count() -> usize {
     // SAFETY: same invariant as `registry()`.
     unsafe { *core::ptr::addr_of!(TASK_COUNT) }
+}
+
+/// Return a raw mutable pointer to the task registry for boot-time MIP writes.
+///
+/// # Safety invariant
+///
+/// The caller must ensure exclusive access — no other code may alias
+/// `TASK_REGISTRY` while this pointer is in use.  Only call from the
+/// single-threaded boot path before interrupts are enabled.
+///
+/// # Why a fn pointer?
+///
+/// Returning `*mut` directly from a safe function would allow callers to
+/// create the pointer without acknowledging the safety obligation.
+/// The caller marks its own `unsafe` block and documents the invariant there.
+pub fn task_registry_ptr() -> *mut [Option<TaskDescriptor>; MAX_TASKS] {
+    core::ptr::addr_of_mut!(TASK_REGISTRY)
 }
