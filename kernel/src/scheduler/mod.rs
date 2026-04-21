@@ -35,6 +35,65 @@ pub use mip::compute_and_store_mip as init_mip;
 /// to the back of its priority level (round-robin tie-breaking).
 pub const TIME_QUANTUM_TICKS: u32 = 5;
 
+/// Maximum context switch latency in CLINT cycles before a warning is logged.
+///
+/// At 10 MHz that is 100 µs.  Exceeding this suggests the trap entry/exit path
+/// has grown beyond the Sprint 4 budget.
+pub const SWITCH_LATENCY_WARN_CYCLES: u32 = 1_000;
+
+/// Number of context switches to accumulate before printing latency stats.
+const SWITCH_STATS_WINDOW: u32 = 1_000;
+
+// ---------------------------------------------------------------------------
+// Context-switch latency statistics (Issue #41)
+// ---------------------------------------------------------------------------
+
+/// Running min/max/total statistics over a sliding window of context switches.
+///
+/// After `SWITCH_STATS_WINDOW` samples the stats are printed to UART and reset.
+struct SwitchStats {
+    min: u32,
+    max: u32,
+    total: u64,
+    count: u32,
+}
+
+impl SwitchStats {
+    const fn new() -> Self {
+        SwitchStats { min: u32::MAX, max: 0, total: 0, count: 0 }
+    }
+
+    /// Record one context-switch latency sample in CLINT cycles.
+    fn record(&mut self, cycles: u32) {
+        if cycles < self.min { self.min = cycles; }
+        if cycles > self.max { self.max = cycles; }
+        self.total += cycles as u64;
+        self.count += 1;
+
+        if self.count >= SWITCH_STATS_WINDOW {
+            let avg = (self.total / self.count as u64) as u32;
+            #[cfg(not(test))]
+            {
+                use crate::uart;
+                uart::uart_puts("Switch latency: min=");
+                uart::uart_print_usize(self.min as usize);
+                uart::uart_puts(" max=");
+                uart::uart_print_usize(self.max as usize);
+                uart::uart_puts(" avg=");
+                uart::uart_print_usize(avg as usize);
+                uart::uart_puts(" cycles");
+                if self.max > SWITCH_LATENCY_WARN_CYCLES {
+                    uart::uart_puts(" [WARN: exceeded budget]");
+                }
+                uart::uart_puts("\n");
+            }
+            let _ = avg; // suppress unused warning in test builds
+            // Reset for next window.
+            *self = SwitchStats::new();
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler state — populated at boot, used by the timer ISR.
 // ---------------------------------------------------------------------------
@@ -47,6 +106,9 @@ static mut CURRENT_TASK_IDX: u8 = 0xFF;
 
 /// Number of ticks the current task has run without being preempted.
 static mut TICKS_SINCE_SWITCH: u32 = 0;
+
+/// Context-switch latency statistics accumulator.
+static mut SWITCH_STATS: SwitchStats = SwitchStats::new();
 
 // ---------------------------------------------------------------------------
 // Boot-time initialisation
@@ -106,7 +168,8 @@ pub fn init() {
 ///
 /// # Arguments
 ///
-/// * `ticks` — current absolute tick count (used for time-quantum enforcement).
+/// * `ticks` — `mtime` value sampled at ISR entry; used to measure the
+///   preemption-decision latency for Issue #41 statistics.
 ///
 /// # Safety invariant
 ///
@@ -155,8 +218,17 @@ pub fn tick(ticks: u32) -> Option<u8> {
                 let old_idx = *cur_ptr;
                 *cur_ptr = next_idx;
                 *ticks_ptr = 0;
-                let _ = ticks; // available for latency logging (Issue #41)
+
                 if next_idx != old_idx {
+                    // Measure the decision latency from ISR entry (ticks is
+                    // the mtime value sampled by the caller at ISR entry).
+                    let now = crate::clint::get_mtime() as u32;
+                    let elapsed = now.wrapping_sub(ticks);
+                    // SAFETY: SWITCH_STATS accessed only in M-mode ISR with
+                    // interrupts disabled; no concurrent access possible.
+                    let stats = core::ptr::addr_of_mut!(SWITCH_STATS);
+                    (*stats).record(elapsed);
+
                     return Some(next_idx);
                 }
             }
