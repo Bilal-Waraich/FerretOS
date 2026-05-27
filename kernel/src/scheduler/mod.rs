@@ -20,6 +20,9 @@ pub mod ccg;
 pub mod mip;
 pub mod queue;
 
+#[cfg(test)]
+mod tests;
+
 use crate::config::MAX_TASKS;
 use crate::memory::task::registry;
 use ccg::CapabilityContentionGraph;
