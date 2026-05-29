@@ -1,0 +1,41 @@
+// FerretOS task schema.
+//
+// Defines the data layout for a kernel task declaration.  Fields map
+// one-to-one to the runtime TaskDescriptor fields used by the CA-PIP
+// scheduler (kernel/src/memory/task.rs).
+//
+// OML features used:
+//   uint8 / uint32  — primitive integer types (no heap allocation, no_std safe)
+//   enum            — Peripheral resource identifier
+//
+// Planned OML extensions (tracked in the OML repo):
+//   const modifier             — marks fields immutable after construction
+//   hex integer literals       — e.g. memory_start: uint32 = 0x8008_1000
+//   struct instance generation — emit static TASK_L: TaskDescriptor = ...
+
+enum Peripheral {
+    string UART0;
+    string UART1;
+    string GPIO0;
+    string GPIO1;
+    string SPI0;
+    string I2C0;
+    string NONE;
+}
+
+// TaskConfig is the OML-facing representation of a task's static properties.
+// build.rs runs OML to generate kernel/src/generated/task_schema.rs from this
+// file; the generated struct is used as the compile-time schema anchor.
+//
+// At runtime the scheduler reads TaskDescriptor (kernel/src/memory/task.rs),
+// which carries additional runtime state (stack_ptr, state, MIP).  A From
+// impl converts TaskConfig → TaskDescriptor during boot registration.
+struct TaskConfig {
+    public uint8  priority;
+    public uint32 stack_size;
+    public uint32 memory_start;
+    public uint32 memory_end;
+    public uint32 exclusive_cap_mask;
+    public uint32 shared_cap_mask;
+    public uint32 required_cap_mask;
+}

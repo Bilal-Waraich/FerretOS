@@ -1,0 +1,56 @@
+// CA-PIP three-task demo definitions.
+//
+// Peripheral bitmasks (one-hot encoding, matches kernel/src/main.rs):
+//   UART0 = bit 0  (exclusive_cap_mask = 0x0000_0001)
+//
+// Expected CA-PIP behaviour after boot:
+//   MIP(L) = max(H.priority) = 3  →  eff_pri(L) = 3
+//   MIP(M) = M.priority      = 2  →  eff_pri(M) = 2
+//   MIP(H) = H.priority      = 3  →  eff_pri(H) = 3
+//
+//   L cannot be preempted by M (eff_pri(L)=3 > priority(M)=2) while L holds UART0.
+//   H runs immediately when UART0 becomes available.
+//
+// NOTE: struct instance generation (emit static TASK_L: TaskDescriptor = ...)
+// is a planned OML extension.  Until it lands, instances are defined by hand
+// in kernel/src/generated/tasks.rs using TaskDescriptor::with_capabilities().
+
+import "task.oml";
+
+// --- Task L — low priority holder ----------------------------------------
+// Holds UART0 exclusively (exclusive_cap_mask = 0x1).
+// MIP is raised to 3 by the CCG because H requires UART0.
+struct TaskL {
+    public uint8  priority;
+    public uint32 stack_size;
+    public uint32 memory_start;
+    public uint32 memory_end;
+    public uint32 exclusive_cap_mask;
+    public uint32 shared_cap_mask;
+    public uint32 required_cap_mask;
+}
+
+// --- Task M — medium priority, CPU-bound ---------------------------------
+// No capability contention; MIP = own priority.
+struct TaskM {
+    public uint8  priority;
+    public uint32 stack_size;
+    public uint32 memory_start;
+    public uint32 memory_end;
+    public uint32 exclusive_cap_mask;
+    public uint32 shared_cap_mask;
+    public uint32 required_cap_mask;
+}
+
+// --- Task H — high priority waiter ---------------------------------------
+// Requires UART0 (required_cap_mask = 0x1), does not hold it at boot.
+// Creates the CCG edge L→H that raises MIP(L).
+struct TaskH {
+    public uint8  priority;
+    public uint32 stack_size;
+    public uint32 memory_start;
+    public uint32 memory_end;
+    public uint32 exclusive_cap_mask;
+    public uint32 shared_cap_mask;
+    public uint32 required_cap_mask;
+}
