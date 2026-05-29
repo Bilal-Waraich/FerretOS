@@ -15,4 +15,4 @@ opt-level = "z"      # Optimise for binary size over speed ("z" is stricter than
 lto = true           # Link-Time Optimisation — dead-code elimination across all crates
 codegen-units = 1    # Required for LTO; also produces smaller, more predictable output
 panic = "abort"      # We supply our own panic handler; no unwinding machinery needed
-strip = false        # Keep symbols for llvm-size / GDB in CI
+strip = "debuginfo"  # Strip debug info in release; retain symbol table for llvm-size / GDB
