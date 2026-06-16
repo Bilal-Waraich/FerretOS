@@ -36,7 +36,7 @@ For full design rationale, algorithm proofs, and ecosystem positioning, see [FER
 | 2 | Memory safety layer | ✅ Complete |
 | 3 | Capability system | ✅ Complete |
 | 4 | CA-PIP scheduler | ✅ Complete |
-| 5 | OML integration | 🔄 In Progress |
+| 5 | OML integration | ✅ Complete |
 | 6 | Polish + demo | 🔲 Pending |
 
 ---
@@ -56,6 +56,8 @@ For full design rationale, algorithm proofs, and ecosystem positioning, see [FER
 ---
 
 ## Architecture
+
+<img src="docs/figures/architecture.svg" alt="FerretOS three-layer architecture diagram" width="640"/>
 
 ```
 Boot sequence:
