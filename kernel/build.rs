@@ -167,8 +167,8 @@ fn compute_mip(tasks: &[TaskConfig]) -> Vec<u8> {
             if tasks[cur].priority > mip[src] {
                 mip[src] = tasks[cur].priority;
             }
-            for succ in 0..n {
-                if edges[cur][succ] && !visited[succ] {
+            for (succ, &is_edge) in edges[cur].iter().enumerate() {
+                if is_edge && !visited[succ] {
                     visited[succ] = true;
                     queue.push_back(succ);
                 }

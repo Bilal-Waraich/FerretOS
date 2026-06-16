@@ -13,6 +13,7 @@ pub mod kani_proofs;
 pub mod memory;
 pub mod scheduler;
 mod uart;
+#[cfg(not(kani))]
 mod panic;
 
 use generated::demo_tasks::{TASK_H, TASK_L, TASK_M};

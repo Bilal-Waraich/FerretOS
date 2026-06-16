@@ -25,10 +25,10 @@ jobs:
       - name: Run Kani verification
         uses: model-checking/kani-github-action@v1
         with:
-          # kani-args passes flags directly to `cargo kani`.
+          # args passes flags directly to `cargo kani`.
           # --output-format terse keeps CI logs readable.
           # --default-unwind 17 covers MAX_TASKS+1 for loops over the registry.
-          kani-args: >-
+          working-directory: kernel
+          args: >-
             --output-format terse
             --default-unwind 17
-            --manifest-path kernel/Cargo.toml
