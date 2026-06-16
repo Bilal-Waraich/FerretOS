@@ -2,13 +2,18 @@
 //!
 //! # Architecture
 //!
-//! 1. **CCG construction** (`ccg.rs`) — built once at boot from task descriptors.
-//! 2. **MIP computation** (`mip.rs`) — BFS over CCG; writes `max_inherited_priority`
-//!    into each `TaskDescriptor`.  Also runs once at boot.
+//! 1. **Build-time CCG + MIP** — `build.rs` parses `src/generated/demo_tasks.rs`,
+//!    constructs the CCG, and runs BFS (with alloc, on the host) to produce
+//!    `src/generated/ccg_constants.rs`.  Zero graph traversal happens at boot.
+//! 2. **MIP write** (`write_precomputed_mip`) — O(N) copy from the const array
+//!    into each `TaskDescriptor.max_inherited_priority`.
 //! 3. **Ready queue** (`queue.rs`) — static max-heap keyed by `effective_priority`.
 //! 4. **Preemption check** (this file) — called from the timer ISR.  Compares the
 //!    running task's `effective_priority` with the head of the ready queue; triggers
 //!    a context switch when a higher-priority task becomes the head.
+//!
+//! `ccg.rs` and `mip.rs` are retained for their unit-test coverage but are not
+//! called at boot.
 //!
 //! # CA-PIP guarantee
 //!
@@ -24,13 +29,16 @@ pub mod queue;
 mod tests;
 
 use crate::config::MAX_TASKS;
-use crate::memory::task::registry;
-use ccg::CapabilityContentionGraph;
-use mip::compute_and_store_mip;
+use crate::generated::ccg_constants::MAX_INHERITED_PRIORITIES;
+use crate::memory::task::{registry, task_count, task_registry_ptr, TaskDescriptor};
 use queue::PriorityQueue;
 
-// Re-export key symbols used by main.rs and the timer ISR.
-pub use mip::compute_and_store_mip as init_mip;
+// ccg and mip modules are retained for their test coverage; they are no
+// longer called at boot.
+#[allow(unused_imports)]
+use ccg::CapabilityContentionGraph;
+#[allow(unused_imports)]
+use mip::compute_and_store_mip;
 
 /// Time quantum in timer ticks (1 tick = 1 ms by default).
 ///
@@ -117,36 +125,42 @@ static mut SWITCH_STATS: SwitchStats = SwitchStats::new();
 // Boot-time initialisation
 // ---------------------------------------------------------------------------
 
+/// Write precomputed MIP values from `ccg_constants` into the task registry.
+///
+/// build.rs parsed demo_tasks.rs, built the CCG, and ran BFS on the host
+/// (with alloc) to populate `MAX_INHERITED_PRIORITIES`.  This call simply
+/// copies those values — O(N) writes, zero graph traversal at boot.
+///
+/// # Safety invariant
+///
+/// Must be called on the single-threaded boot path before interrupts fire.
+fn write_precomputed_mip() {
+    let n = task_count();
+    // SAFETY: single-threaded boot path, no concurrent writes.
+    unsafe {
+        let reg_ptr: *mut [Option<TaskDescriptor>; MAX_TASKS] = task_registry_ptr();
+        for i in 0..n {
+            if let Some(slot) = (*reg_ptr)[i].as_mut() {
+                slot.max_inherited_priority = MAX_INHERITED_PRIORITIES[i];
+            }
+        }
+    }
+}
+
 /// Initialise the scheduler subsystem.
 ///
-/// 1. Builds the CCG from the task registry.
-/// 2. Computes and stores MIP in every `TaskDescriptor`.
-/// 3. Enqueues all `Ready` tasks into the ready queue.
-/// 4. Sets the highest-priority task as the current task.
+/// 1. Writes precomputed MIP into every `TaskDescriptor` (from build.rs constants).
+/// 2. Enqueues all `Ready` tasks into the ready queue.
+/// 3. Sets the highest-priority task as the current task.
 ///
 /// # Safety invariant
 ///
 /// Must be called after all tasks are registered and before interrupts are
 /// enabled (single-threaded boot path).
 pub fn init() {
-    let reg = registry();
-    let ccg = CapabilityContentionGraph::build(reg);
+    write_precomputed_mip();
 
-    // Warn if the CCG contains a cycle — mutual-blocking tasks will never
-    // make progress once either side is scheduled.
-    #[cfg(not(test))]
-    if let Some((u, v)) = ccg.detect_cycle() {
-        use crate::uart;
-        uart::uart_puts("WARNING: CCG cycle detected: task ");
-        uart::uart_print_usize(u);
-        uart::uart_puts(" -> task ");
-        uart::uart_print_usize(v);
-        uart::uart_puts(" -> ... (mutual block — check capability declarations)\n");
-    }
-
-    compute_and_store_mip(&ccg);
-
-    // Re-read registry after MIP has been written back.
+    // Read registry after MIP has been written.
     let reg = registry();
 
     // SAFETY: single-threaded boot path; no ISR can fire yet.
