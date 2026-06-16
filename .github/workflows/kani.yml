@@ -32,5 +32,5 @@ jobs:
           args: >-
             --output-format terse
             --default-unwind 17
-            --enable-unstable
+            -Z unstable-options
             --ignore-global-asm
