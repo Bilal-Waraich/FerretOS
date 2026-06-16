@@ -8,6 +8,8 @@ pub mod clint;
 pub mod config;
 pub mod context;
 pub mod generated;
+#[cfg(kani)]
+pub mod kani_proofs;
 pub mod memory;
 pub mod scheduler;
 mod uart;

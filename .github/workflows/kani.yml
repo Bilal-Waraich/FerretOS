@@ -1,0 +1,34 @@
+name: Kani Verification
+
+# Run bounded model checking on every push and PR to main or dev.
+# Kani proves absence of panics, integer overflows, and assertion violations
+# for the CCG construction, capability conflict detector, and priority queue.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  kani:
+    name: Kani bounded verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Kani requires a specific nightly toolchain managed internally.
+      # The model-checking/kani-github-action installs it automatically.
+      - name: Run Kani verification
+        uses: model-checking/kani-github-action@v1
+        with:
+          # kani-args passes flags directly to `cargo kani`.
+          # --output-format terse keeps CI logs readable.
+          # --default-unwind 17 covers MAX_TASKS+1 for loops over the registry.
+          kani-args: >-
+            --output-format terse
+            --default-unwind 17
+            --manifest-path kernel/Cargo.toml

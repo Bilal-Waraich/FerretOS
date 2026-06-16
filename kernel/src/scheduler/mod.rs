@@ -83,7 +83,7 @@ impl SwitchStats {
 
         if self.count >= SWITCH_STATS_WINDOW {
             let avg = (self.total / self.count as u64) as u32;
-            #[cfg(not(test))]
+            #[cfg(not(any(test, kani)))]
             {
                 use crate::uart;
                 uart::uart_puts("Switch latency: min=");

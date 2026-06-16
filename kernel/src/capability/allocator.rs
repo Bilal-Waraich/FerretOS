@@ -14,7 +14,7 @@
 
 use crate::config::MAX_PERIPHERALS;
 use crate::memory::task::TaskDescriptor;
-#[cfg(not(test))]
+#[cfg(not(any(test, kani)))]
 use crate::uart;
 
 /// Check for exclusive capability conflicts across all registered tasks.
@@ -52,7 +52,7 @@ pub fn check_capability_conflicts(registry: &[Option<TaskDescriptor>]) {
 fn report_conflict_and_halt(cap_id: usize, task_a: u8, task_b: u8) -> ! {
     // In test builds, panic with a message so #[should_panic] tests work.
     // In kernel builds, print to UART and spin — panic_handler calls loop {}.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, kani)))]
     {
         uart::uart_puts("CAPABILITY CONFLICT: peripheral ");
         uart::uart_print_usize(cap_id);
@@ -70,7 +70,7 @@ fn report_conflict_and_halt(cap_id: usize, task_a: u8, task_b: u8) -> ! {
             unsafe { core::arch::asm!("wfi") };
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, kani))]
     panic!(
         "CAPABILITY CONFLICT: peripheral {} claimed by task {} and task {}",
         cap_id, task_a, task_b
@@ -82,7 +82,7 @@ fn report_conflict_and_halt(cap_id: usize, task_a: u8, task_b: u8) -> ! {
 /// Called when a capability ID exceeds MAX_PERIPHERALS.
 /// Never returns.
 fn report_out_of_range_and_halt(cap_id: usize, task_id: u8) -> ! {
-    #[cfg(not(test))]
+    #[cfg(not(any(test, kani)))]
     {
         uart::uart_puts("CAPABILITY ERROR: peripheral ID ");
         uart::uart_print_usize(cap_id);
@@ -98,7 +98,7 @@ fn report_out_of_range_and_halt(cap_id: usize, task_id: u8) -> ! {
             unsafe { core::arch::asm!("wfi") };
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, kani))]
     panic!(
         "CAPABILITY ERROR: peripheral ID {} out of range in task {}",
         cap_id, task_id
