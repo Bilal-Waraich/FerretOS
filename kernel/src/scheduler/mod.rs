@@ -131,6 +131,19 @@ static mut SWITCH_STATS: SwitchStats = SwitchStats::new();
 pub fn init() {
     let reg = registry();
     let ccg = CapabilityContentionGraph::build(reg);
+
+    // Warn if the CCG contains a cycle — mutual-blocking tasks will never
+    // make progress once either side is scheduled.
+    #[cfg(not(test))]
+    if let Some((u, v)) = ccg.detect_cycle() {
+        use crate::uart;
+        uart::uart_puts("WARNING: CCG cycle detected: task ");
+        uart::uart_print_usize(u);
+        uart::uart_puts(" -> task ");
+        uart::uart_print_usize(v);
+        uart::uart_puts(" -> ... (mutual block — check capability declarations)\n");
+    }
+
     compute_and_store_mip(&ccg);
 
     // Re-read registry after MIP has been written back.

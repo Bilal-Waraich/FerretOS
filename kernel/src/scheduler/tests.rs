@@ -242,6 +242,64 @@ mod tests {
     // Edge cases: empty registry, single task, cyclic graph (closes #71)
     // -----------------------------------------------------------------------
 
+    // -----------------------------------------------------------------------
+    // Cycle detection tests (closes #73)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detect_cycle_finds_two_cycle() {
+        let cap0: u32 = 1 << 0;
+        let cap1: u32 = 1 << 1;
+        let mut reg: [Option<TaskDescriptor>; MAX_TASKS] = [const { None }; MAX_TASKS];
+        reg[0] = Some(TaskDescriptor::with_capabilities(
+            0, 2, 0x2000_0000, 256, 0x2000_1000, 0x2000_2000,
+            cap0, 0, cap1, // A: holds cap0, requires cap1
+        ));
+        reg[1] = Some(TaskDescriptor::with_capabilities(
+            1, 4, 0x2000_2000, 256, 0x2000_3000, 0x2000_4000,
+            cap1, 0, cap0, // B: holds cap1, requires cap0
+        ));
+        let ccg = CapabilityContentionGraph::build(&reg);
+        assert!(ccg.detect_cycle().is_some(), "A↔B mutual-block should be detected as a cycle");
+    }
+
+    #[test]
+    fn detect_cycle_demo_registry_is_acyclic() {
+        // The 3-task demo has exactly one edge L→H; no cycle.
+        let reg = demo_registry();
+        let ccg = CapabilityContentionGraph::build(&reg);
+        assert!(ccg.detect_cycle().is_none(), "demo CCG (L→H only) must be acyclic");
+    }
+
+    #[test]
+    fn detect_cycle_empty_registry_is_acyclic() {
+        let reg: [Option<TaskDescriptor>; MAX_TASKS] = [const { None }; MAX_TASKS];
+        let ccg = CapabilityContentionGraph::build(&reg);
+        assert!(ccg.detect_cycle().is_none());
+    }
+
+    #[test]
+    fn detect_cycle_chain_is_acyclic() {
+        // Linear chain A→B→C has no back-edge.
+        let cap0: u32 = 1 << 0;
+        let cap1: u32 = 1 << 1;
+        let mut reg: [Option<TaskDescriptor>; MAX_TASKS] = [const { None }; MAX_TASKS];
+        reg[0] = Some(TaskDescriptor::with_capabilities(
+            0, 1, 0x2000_0000, 256, 0x2000_1000, 0x2000_2000,
+            cap0, 0, 0,
+        ));
+        reg[1] = Some(TaskDescriptor::with_capabilities(
+            1, 3, 0x2000_2000, 256, 0x2000_3000, 0x2000_4000,
+            cap1, 0, cap0,
+        ));
+        reg[2] = Some(TaskDescriptor::with_capabilities(
+            2, 5, 0x2000_4000, 256, 0x2000_5000, 0x2000_6000,
+            0, 0, cap1,
+        ));
+        let ccg = CapabilityContentionGraph::build(&reg);
+        assert!(ccg.detect_cycle().is_none(), "linear chain must be acyclic");
+    }
+
     #[test]
     fn ccg_empty_registry_no_panic() {
         let reg: [Option<TaskDescriptor>; MAX_TASKS] = [const { None }; MAX_TASKS];

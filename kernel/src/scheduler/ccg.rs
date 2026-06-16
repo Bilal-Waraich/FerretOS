@@ -80,4 +80,70 @@ impl CapabilityContentionGraph {
     pub fn successors(&self, from: usize) -> impl Iterator<Item = usize> + '_ {
         (0..MAX_TASKS).filter(move |&j| self.edges[from][j])
     }
+
+    /// Detect cycles in the CCG using iterative DFS; return `true` if any cycle exists.
+    ///
+    /// A CCG cycle (A holds cap0 needed by B; B holds cap1 needed by A) means the
+    /// two tasks are in a mutual-blocking relationship.  The MIP BFS handles cycles
+    /// correctly via `visited[]`, but the presence of a cycle is almost always a
+    /// declaration error worth surfacing at boot.
+    ///
+    /// Algorithm: for each unvisited node, push it onto a DFS stack.  Track a
+    /// `rec_stack` (nodes currently on the recursion path); a back-edge to a node
+    /// in `rec_stack` means a cycle.  O(N²) time, O(N) space.
+    ///
+    /// Returns the index pair `(u, v)` of the back-edge that closes the first
+    /// detected cycle, or `None` if the graph is acyclic.
+    pub fn detect_cycle(&self) -> Option<(usize, usize)> {
+        let n = self.task_count;
+        let mut visited  = [false; MAX_TASKS];
+        let mut rec_stack = [false; MAX_TASKS];
+
+        for start in 0..n {
+            if visited[start] {
+                continue;
+            }
+            // Iterative DFS using an explicit stack of (node, iterator-state).
+            // iterator-state is the next successor index to explore from `node`.
+            let mut dfs: [(usize, usize); MAX_TASKS] = [(0, 0); MAX_TASKS];
+            let mut depth = 0;
+            dfs[0] = (start, 0);
+            visited[start] = true;
+            rec_stack[start] = true;
+
+            loop {
+                let (node, next_succ) = dfs[depth];
+                // Find the next unvisited (or in-rec-stack) successor.
+                let mut found = false;
+                for succ in next_succ..MAX_TASKS {
+                    if !self.edges[node][succ] {
+                        continue;
+                    }
+                    // Update iterator state for next iteration at this depth.
+                    dfs[depth].1 = succ + 1;
+                    if rec_stack[succ] {
+                        // Back-edge found — cycle exists.
+                        return Some((node, succ));
+                    }
+                    if !visited[succ] {
+                        visited[succ] = true;
+                        rec_stack[succ] = true;
+                        depth += 1;
+                        dfs[depth] = (succ, 0);
+                    }
+                    found = true;
+                    break;
+                }
+                if !found {
+                    // All successors of `node` exhausted — backtrack.
+                    rec_stack[node] = false;
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+            }
+        }
+        None
+    }
 }
