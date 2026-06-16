@@ -7,12 +7,14 @@ pub mod capability;
 pub mod clint;
 pub mod config;
 pub mod context;
+pub mod generated;
 pub mod memory;
 pub mod scheduler;
 mod uart;
 mod panic;
 
-use memory::task::{TaskDescriptor, register_task};
+use generated::demo_tasks::{TASK_H, TASK_L, TASK_M};
+use memory::task::register_task;
 use riscv_rt::entry;
 
 const KERNEL_NAME: &str = "FerretOS";
@@ -46,9 +48,6 @@ const _: () = memory::assert_no_overlap::<
 //   H runs immediately when L releases UART0
 // ---------------------------------------------------------------------------
 
-/// Peripheral bit for UART0.
-const UART0_BIT: u32 = 1 << 0;
-
 // Statically allocated stacks for the three demo tasks.
 // Each Stack<4096> lives in .bss and is zero-initialised before kernel_main.
 static mut STACK_TASK_L: memory::Stack<4096> = memory::Stack::new();
@@ -68,7 +67,7 @@ fn kernel_main() -> ! {
     uart::uart_puts(KERNEL_NAME);
     uart::uart_puts(" v");
     uart::uart_puts(KERNEL_VERSION);
-    uart::uart_puts(" — Sprint 4 (CA-PIP scheduler)\n");
+    uart::uart_puts(" — Sprint 5 (OML integration)\n");
     uart::uart_puts("Target : riscv32imac-unknown-none-elf\n");
     uart::uart_puts("Machine: QEMU virt\n");
 
@@ -89,44 +88,9 @@ fn kernel_main() -> ! {
     let stack_m_base = core::ptr::addr_of!(STACK_TASK_M) as usize;
     let stack_h_base = core::ptr::addr_of!(STACK_TASK_H) as usize;
 
-    // Task L: priority 1, holds UART0 exclusively.
-    register_task(TaskDescriptor::with_capabilities(
-        0,              // id
-        1,              // base priority
-        stack_l_base,
-        4096,
-        0x8008_1000,    // memory_start
-        0x8008_2000,    // memory_end
-        UART0_BIT,      // exclusive_cap_mask: holds UART0
-        0,              // shared_cap_mask
-        0,              // required_cap_mask
-    ));
-
-    // Task M: priority 2, CPU-bound, no capabilities.
-    register_task(TaskDescriptor::with_capabilities(
-        1,              // id
-        2,              // base priority
-        stack_m_base,
-        4096,
-        0x8008_2000,    // memory_start
-        0x8008_3000,    // memory_end
-        0,              // exclusive_cap_mask
-        0,              // shared_cap_mask
-        0,              // required_cap_mask
-    ));
-
-    // Task H: priority 3, requires UART0.
-    register_task(TaskDescriptor::with_capabilities(
-        2,              // id
-        3,              // base priority
-        stack_h_base,
-        4096,
-        0x8008_3000,    // memory_start
-        0x8008_4000,    // memory_end
-        0,              // exclusive_cap_mask: H does not hold UART0 yet
-        0,              // shared_cap_mask
-        UART0_BIT,      // required_cap_mask: H needs UART0
-    ));
+    register_task(TASK_L.into_descriptor(0, stack_l_base));
+    register_task(TASK_M.into_descriptor(1, stack_m_base));
+    register_task(TASK_H.into_descriptor(2, stack_h_base));
 
     let count = memory::task_count();
     uart::uart_puts("Tasks registered: ");
