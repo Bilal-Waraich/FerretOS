@@ -103,8 +103,13 @@ fn kernel_main() -> ! {
     capability::check_capability_conflicts(memory::registry());
     uart::uart_puts("Capability check passed.\n");
 
+    // --- PMP configuration (feature = "pmp", closes #32) -------------------
+    // Map each task's memory region to a RISC-V PMP TOR entry.
+    // No-op when the pmp feature is not enabled.
+    memory::configure_pmp();
+
     // --- Scheduler init (Issues #35, #36, #37, #38, #39) --------------------
-    // Build CCG, compute MIP for all tasks, populate ready queue.
+    // Write precomputed MIP constants, populate ready queue.
     // Must run before interrupts are enabled.
     scheduler::init();
     uart::uart_puts("Scheduler initialised.\n");

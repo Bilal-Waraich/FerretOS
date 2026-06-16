@@ -12,6 +12,12 @@ edition = "2021"
 name = "ferret"
 path = "src/main.rs"
 
+[features]
+# Enable RISC-V PMP (Physical Memory Protection) register configuration at boot.
+# Maps each task's memory_start/end pair to a TOR PMP entry (R+W, M-mode only).
+# Supports up to 8 tasks (16 PMP entries, 2 per task).
+pmp = []
+
 [dependencies]
 # riscv-rt provides the low-level reset vector, stack pointer initialisation,
 # and the #[entry] macro that lets us write our kernel entry point in safe
