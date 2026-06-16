@@ -25,6 +25,11 @@ use std::process::Command;
 const MAX_TASKS: usize = 16;
 
 fn main() {
+    // Declare `kani` as a known cfg name so the `unexpected_cfgs` lint does
+    // not fire on `#[cfg(kani)]` / `#[cfg(not(kani))]` attributes.
+    // Kani sets this flag when it compiles the crate for model checking.
+    println!("cargo::rustc-check-cfg=cfg(kani)");
+
     // --- Linker script setup ------------------------------------------------
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     println!("cargo:rustc-link-search={}", manifest_dir.display());

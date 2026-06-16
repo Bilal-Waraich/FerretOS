@@ -139,9 +139,9 @@ fn write_precomputed_mip() {
     // SAFETY: single-threaded boot path, no concurrent writes.
     unsafe {
         let reg_ptr: *mut [Option<TaskDescriptor>; MAX_TASKS] = task_registry_ptr();
-        for i in 0..n {
+        for (i, &mip) in MAX_INHERITED_PRIORITIES.iter().enumerate().take(n) {
             if let Some(slot) = (*reg_ptr)[i].as_mut() {
-                slot.max_inherited_priority = MAX_INHERITED_PRIORITIES[i];
+                slot.max_inherited_priority = mip;
             }
         }
     }

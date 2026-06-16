@@ -123,6 +123,9 @@ fn kernel_main() -> ! {
 
     // Point mtvec at our trap entry stub.  Direct mode: bits[1:0] = 0 means
     // all traps dispatch to the same handler address.
+    // Not compiled under Kani (x86_64 host) — RISC-V CSR instructions are
+    // never executed by proof harnesses.
+    #[cfg(not(kani))]
     unsafe {
         core::arch::asm!(
             "la t0, __trap_entry",
@@ -140,6 +143,7 @@ fn kernel_main() -> ! {
     // yet set — harmless here but a bad habit for future critical sections.
     // csrsi only accepts 5-bit immediates; MTIE (bit 7) and MIE (bit 3)
     // exceed that, so we use csrs with a register-held mask instead.
+    #[cfg(not(kani))]
     unsafe {
         core::arch::asm!(
             "li   t0, 0x80",        // MTIE mask
