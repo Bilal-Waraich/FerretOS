@@ -102,8 +102,40 @@ RAM_USED=$(( DATA_SIZE + BSS_SIZE ))
 # ---------------------------------------------------------------------------
 # Print the report
 # ---------------------------------------------------------------------------
+
+# ANSI colour codes — suppressed when not a terminal (e.g. CI log capture).
+if [[ -t 1 ]]; then
+    RED='\033[0;31m'; YELLOW='\033[0;33m'; GREEN='\033[0;32m'; RESET='\033[0m'
+else
+    RED=''; YELLOW=''; GREEN=''; RESET=''
+fi
+
 human_kb() {
-    echo "$(( ($1 + 512) / 1024 )) KB ($1 B)"
+    echo "$(( ($1 + 512) / 1024 )) KB"
+}
+
+# Print a progress bar: bar_line <label> <used> <budget>
+bar_line() {
+    local label="$1" used="$2" budget="$3"
+    local bar_width=20
+    local pct=$(( used * 100 / budget ))
+    local filled=$(( used * bar_width / budget ))
+    # Clamp filled to bar_width on overflow.
+    (( filled > bar_width )) && filled=$bar_width
+    local empty=$(( bar_width - filled ))
+
+    local bar=""
+    local i
+    for (( i = 0; i < filled; i++ )); do bar="${bar}█"; done
+    for (( i = 0; i < empty;  i++ )); do bar="${bar}░"; done
+
+    local colour="$GREEN"
+    (( pct >= 80 )) && colour="$YELLOW"
+    (( pct >= 95 )) && colour="$RED"
+
+    printf "  %-6s %b[%s]%b  %4s KB / %s KB  (%d%%)\n" \
+        "$label:" "$colour" "$bar" "$RESET" \
+        "$(( (used + 512) / 1024 ))" "$(( (budget + 512) / 1024 ))" "$pct"
 }
 
 echo "=========================================="
@@ -116,8 +148,8 @@ printf "  %-10s %8s bytes\n" ".rodata" "$RODATA_SIZE"
 printf "  %-10s %8s bytes\n" ".data"   "$DATA_SIZE"
 printf "  %-10s %8s bytes\n" ".bss"    "$BSS_SIZE"
 echo "------------------------------------------"
-printf "  %-10s %8s / %s\n"  "FLASH"   "$(human_kb $FLASH_USED)" "$(human_kb $FLASH_BUDGET)"
-printf "  %-10s %8s / %s\n"  "RAM"     "$(human_kb $RAM_USED)"   "$(human_kb $RAM_BUDGET)"
+bar_line "Flash" "$FLASH_USED" "$FLASH_BUDGET"
+bar_line "RAM"   "$RAM_USED"   "$RAM_BUDGET"
 echo "=========================================="
 
 # ---------------------------------------------------------------------------
@@ -129,14 +161,14 @@ if [[ "$FLASH_USED" -gt "$FLASH_BUDGET" ]]; then
     echo "FAIL: FLASH budget exceeded by $(( FLASH_USED - FLASH_BUDGET )) bytes!" >&2
     FAIL=true
 else
-    echo "  FLASH: OK ($(( FLASH_BUDGET - FLASH_USED )) bytes remaining)"
+    echo "  Flash: OK ($(( FLASH_BUDGET - FLASH_USED )) bytes remaining)"
 fi
 
 if [[ "$RAM_USED" -gt "$RAM_BUDGET" ]]; then
     echo "FAIL: RAM budget exceeded by $(( RAM_USED - RAM_BUDGET )) bytes!" >&2
     FAIL=true
 else
-    echo "  RAM  : OK ($(( RAM_BUDGET - RAM_USED )) bytes remaining)"
+    echo "  RAM:   OK ($(( RAM_BUDGET - RAM_USED )) bytes remaining)"
 fi
 
 echo "=========================================="

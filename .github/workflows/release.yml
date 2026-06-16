@@ -1,0 +1,78 @@
+name: Publish Release
+
+# Manually triggered from the Actions tab.  Builds the kernel in release mode,
+# uploads ferret.elf as a release asset, appends the size report to the release
+# notes, and publishes the draft release that was created by the v0.1.0 tag.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+env:
+  TARGET: riscv32imac-unknown-none-elf
+  CACHE_VERSION: v1
+
+jobs:
+  publish-release:
+    name: Build, size-check, and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2024-12-01
+          targets: ${{ env.TARGET }}
+          components: rust-src, llvm-tools
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ env.CACHE_VERSION }}-release-${{ env.TARGET }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-release-${{ env.TARGET }}-
+
+      - name: Build kernel (release)
+        run: cargo build --release
+
+      - name: Run size budget report
+        id: size
+        run: |
+          cargo install cargo-binutils --locked 2>/dev/null || true
+          rustup component add llvm-tools 2>/dev/null || true
+          # Capture output and also let it print to the log.
+          SIZE_OUT=$(bash scripts/size_report.sh 2>&1 | tee /dev/stderr)
+          echo "size_report<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$SIZE_OUT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload ferret.elf to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          draft: false
+          files: target/riscv32imac-unknown-none-elf/release/ferret
+          body_append: |
+
+            ---
+            ## Size report
+
+            ```
+            ${{ steps.size.outputs.size_report }}
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
