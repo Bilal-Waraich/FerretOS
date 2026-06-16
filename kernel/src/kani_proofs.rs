@@ -54,7 +54,7 @@ mod proofs {
     ///
     /// Bound: 5 (4 tasks + 1) to keep state-space tractable.
     #[kani::proof]
-    #[kani::unwind(5)]
+    #[kani::unwind(17)]
     fn verify_ccg_build_no_oob() {
         let n: usize = kani::any();
         // Restrict to a small bound to keep the proof tractable.
@@ -81,7 +81,7 @@ mod proofs {
     /// Verify the key CCG correctness property: an edge (L, H) exists if and
     /// only if `L.exclusive_cap_mask & H.required_cap_mask != 0`.
     #[kani::proof]
-    #[kani::unwind(3)]
+    #[kani::unwind(17)]
     fn verify_ccg_edge_iff_contention() {
         let mut reg: [Option<TaskDescriptor>; MAX_TASKS] = [const { None }; MAX_TASKS];
         reg[0] = Some(arbitrary_task(0));
@@ -109,7 +109,7 @@ mod proofs {
     /// Kani explores all possible cap mask values; the `#[should_panic]`
     /// equivalent is modelled as `kani::expect_fail`.
     #[kani::proof]
-    #[kani::unwind(3)]
+    #[kani::unwind(33)]
     fn verify_conflict_detector_catches_double_exclusive() {
         let shared_bit: u32 = kani::any();
         // Restrict to a single set bit so the conflict is clear.
@@ -135,7 +135,7 @@ mod proofs {
 
     /// Verify that non-overlapping exclusive caps never trigger a false positive.
     #[kani::proof]
-    #[kani::unwind(3)]
+    #[kani::unwind(33)]
     fn verify_conflict_detector_no_false_positive() {
         // Two tasks with disjoint exclusive caps must not conflict.
         let cap_a: u32 = kani::any();
