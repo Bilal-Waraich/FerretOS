@@ -36,7 +36,7 @@ For full design rationale, algorithm proofs, and ecosystem positioning, see [FER
 | 2 | Memory safety layer | ✅ Complete |
 | 3 | Capability system | ✅ Complete |
 | 4 | CA-PIP scheduler | ✅ Complete |
-| 5 | OML integration | 🔲 Pending |
+| 5 | OML integration | 🔄 In Progress |
 | 6 | Polish + demo | 🔲 Pending |
 
 ---
@@ -122,6 +122,17 @@ L cannot be preempted by M (eff_pri 3 > M.base_priority 2). H runs as soon as L 
   apt-get install qemu-system-misc  # Debian/Ubuntu
   ```
 
+### Cloning
+
+The OML transpiler is included as a git submodule at `oml/`. Clone with:
+
+```bash
+git clone --recurse-submodules https://github.com/Bilal-Waraich/FerretOS
+
+# Or if you already cloned without submodules:
+git submodule update --init
+```
+
 ---
 
 ## Build and Run
@@ -138,7 +149,7 @@ cargo build --release
 ./scripts/size_report.sh
 
 # Lint (zero-warning policy)
-cargo clippy --all-targets -- -D warnings
+cargo clippy -- -D warnings
 ```
 
 ### Expected boot output
@@ -147,7 +158,7 @@ cargo clippy --all-targets -- -D warnings
 ====================================
   Ferret booting...
 ====================================
-FerretOS v0.1.0 — Sprint 4 (CA-PIP scheduler)
+FerretOS v0.1.0 — Sprint 5 (OML integration)
 Target : riscv32imac-unknown-none-elf
 Machine: QEMU virt
 Memory map:
@@ -225,14 +236,22 @@ These two bitmask fields are distinct by design. `exclusive_cap_mask` means "thi
 ```
 FerretOS/
 ├── kernel/src/
-│   ├── main.rs           — boot sequence, demo task registration
+│   ├── main.rs           — boot sequence, OML-generated task registration
 │   ├── config.rs         — MAX_TASKS, MAX_PERIPHERALS
+│   ├── generated/        — OML transpiler output (committed; no OML required to build)
+│   │   ├── task_schema.rs — TaskConfig struct generated from task.oml
+│   │   ├── demo_tasks.rs  — TASK_L/M/H statics generated from demo_tasks.oml
+│   │   └── bridge.rs      — TaskConfig::into_descriptor (hand-written bridge)
 │   ├── memory/           — MemoryRegion, Stack, TaskDescriptor, TASK_REGISTRY
 │   ├── capability/       — ZST types, wrappers, boot-time conflict detector
 │   ├── scheduler/        — CCG, MIP, PriorityQueue, preemption logic
 │   ├── context/          — TrapFrame, __context_switch, __trap_entry
 │   ├── clint.rs          — CLINT timer driver
 │   └── uart.rs           — 16550 UART driver
+├── tasks/
+│   ├── task.oml          — TaskConfig schema (struct + Peripheral enum)
+│   └── demo_tasks.oml    — TASK_L, TASK_M, TASK_H instance declarations
+├── oml/                  — OML transpiler submodule (pinned commit)
 ├── linker/ferret.ld      — FLASH @ 0x8000_0000 / RAM @ 0x8008_0000
 ├── scripts/
 │   ├── run_qemu.sh       — launch QEMU (--gdb adds GDB stub)

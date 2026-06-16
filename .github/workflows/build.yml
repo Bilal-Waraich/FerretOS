@@ -21,9 +21,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Check out the repository at the commit that triggered this run.
+      # 1. Check out the repository and all submodules (OML transpiler at oml/).
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       # 2. Install the pinned nightly toolchain, our cross-compilation target,
       #    and the LLVM tools component that size_report.sh depends on.

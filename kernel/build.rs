@@ -73,6 +73,13 @@ fn find_oml_binary(manifest_dir: &Path) -> Option<String> {
         println!("cargo:warning=OML_BIN={} not found on disk.", bin);
     }
 
+    // Git submodule at the repo root (oml/ relative to kernel/).
+    let submodule = manifest_dir.join("../oml/target/release/oml");
+    if submodule.exists() {
+        return Some(submodule.to_string_lossy().into_owned());
+    }
+
+    // Sibling repository layout used during local development.
     let sibling = manifest_dir.join("../../OML/target/release/oml");
     if sibling.exists() {
         return Some(sibling.to_string_lossy().into_owned());
