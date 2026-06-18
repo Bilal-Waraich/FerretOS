@@ -1,0 +1,30 @@
+name: Lean Verification
+
+# Type-check the Lean 4 formal model of the CA-PIP scheduler on every push and
+# PR to main or dev. This is the algorithmic-proof analogue of the Kani
+# bounded-verification workflow: Kani proves properties of the Rust kernel,
+# Lean proves properties of the scheduler's mathematical specification.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  lean:
+    name: Lean proof type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # lean-action reads lean/lean-toolchain to install the pinned Lean via
+      # elan, runs `lake exe cache get` to fetch prebuilt Mathlib oleans (so
+      # Mathlib is not rebuilt from source), then runs `lake build`.
+      - name: Build and type-check Lean proofs
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: "lean"
+          use-mathlib-cache: "true"

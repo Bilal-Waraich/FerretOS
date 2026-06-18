@@ -1,0 +1,14 @@
+name = "FerretOS"
+version = "0.1.0"
+defaultTargets = ["FerretOS"]
+
+# Pinned to match the toolchain in lean-toolchain (Lean v4.22.0) so the
+# prebuilt Mathlib oleans fetched by `lake exe cache get` apply directly and
+# CI does not rebuild Mathlib from source.
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.22.0"
+
+[[lean_lib]]
+name = "FerretOS"
