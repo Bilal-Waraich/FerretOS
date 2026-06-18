@@ -32,10 +32,14 @@ variable {n : ℕ}
 theorem mip_ge_of_reachable (tasks : Fin n → Task) {t u : Fin n}
     (h : reachable tasks t u) :
     (tasks u).priority ≤ mip tasks t := by
-  have hle : (fun v => if reachable tasks t v then (tasks v).priority else 0) u
-      ≤ mip tasks t :=
-    Finset.le_sup (Finset.mem_univ u)
-  simpa [if_pos h] using hle
+  -- Unfold `mip` so the goal's RHS is a literal `Finset.univ.sup f` that
+  -- `Finset.le_sup` can unify against (the elaborator will not unfold the
+  -- `mip` definition on its own during unification).
+  unfold mip
+  calc (tasks u).priority
+      = (if reachable tasks t u then (tasks u).priority else 0) := by rw [if_pos h]
+    _ ≤ Finset.univ.sup (fun v => if reachable tasks t v then (tasks v).priority else 0) :=
+        Finset.le_sup (Finset.mem_univ u)
 
 /-- A task's own base priority never exceeds its MIP (reachability is reflexive,
     so the task itself is in the supremum). Mirrors the `mip ≥ base_priority`
