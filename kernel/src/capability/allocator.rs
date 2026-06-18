@@ -7,10 +7,16 @@
 //!
 //! # Algorithm
 //!
-//! Iterate over all registered tasks; for each task iterate over set bits in
-//! `exclusive_cap_mask`.  Track which peripheral IDs have already been claimed
-//! in a fixed-size `claimed` array.  O(N × P) where N ≤ MAX_TASKS = 16 and
-//! P ≤ MAX_PERIPHERALS = 32 — effectively O(1) for this target.
+//! Iterate over all registered tasks; for each task scan the 32 bits of
+//! `exclusive_cap_mask` by index.  Track which peripheral IDs have already been
+//! claimed in a fixed-size `claimed` array.  O(N × P) where N ≤ MAX_TASKS = 16
+//! and P ≤ MAX_PERIPHERALS = 32 — effectively O(1) for this target.
+//!
+//! The scan uses an explicit `0..32` index loop rather than the
+//! `exclusive_capabilities()` adapter so that the `claimed[cap_id]` access uses
+//! a concrete index.  This keeps the Kani harness tractable: an index that
+//! flows through an iterator adapter is treated as symbolic by the model
+//! checker, turning every array write into a 32-way array-theory update.
 
 use crate::config::MAX_PERIPHERALS;
 use crate::memory::task::TaskDescriptor;
@@ -31,8 +37,14 @@ pub fn check_capability_conflicts(registry: &[Option<TaskDescriptor>]) {
     // claimed[i] = Some(task_id) means peripheral i is already held exclusively.
     let mut claimed: [Option<u8>; MAX_PERIPHERALS] = [None; MAX_PERIPHERALS];
 
-    for task in registry.iter().flatten() {
-        for cap_id in task.exclusive_capabilities() {
+    for slot in registry {
+        let Some(task) = slot else { continue };
+        // Scan every bit of the u32 mask with a concrete index so `claimed`
+        // is accessed by a constant offset (see module docs).
+        for cap_id in 0..u32::BITS as usize {
+            if task.exclusive_cap_mask & (1u32 << cap_id) == 0 {
+                continue;
+            }
             if cap_id >= MAX_PERIPHERALS {
                 // Bit set beyond the supported range — treat as configuration error.
                 report_out_of_range_and_halt(cap_id, task.id);
