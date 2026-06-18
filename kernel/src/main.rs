@@ -8,6 +8,7 @@ pub mod clint;
 pub mod config;
 pub mod context;
 pub mod generated;
+pub mod ipc;
 #[cfg(kani)]
 pub mod kani_proofs;
 pub mod memory;

@@ -21,3 +21,9 @@ const _: () = assert!(
     MAX_PERIPHERALS <= 32,
     "MAX_PERIPHERALS must fit in a u32 bitmask (max 32)"
 );
+
+/// Maximum number of IPC channels addressable by capability ID.
+///
+/// Bounds the channel-endpoint conflict check in the capability allocator and
+/// any static channel registry.  Channel IDs run `0..MAX_CHANNELS`.
+pub const MAX_CHANNELS: usize = 8;
