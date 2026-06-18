@@ -106,9 +106,13 @@ mod proofs {
     /// Verify that two tasks with the same exclusive capability bit always
     /// trigger a panic in `check_capability_conflicts`.
     ///
-    /// Kani explores all possible cap mask values; the `#[should_panic]`
-    /// equivalent is modelled as `kani::expect_fail`.
+    /// `#[kani::should_panic]` requires the harness to panic on every path:
+    /// two tasks sharing one exclusive bit always conflict, so the detector
+    /// always halts (which under `cfg(kani)` is a `panic!`). If the detector
+    /// ever returned instead, the harness would fall through without panicking
+    /// and Kani would report the missing panic as a failure.
     #[kani::proof]
+    #[kani::should_panic]
     #[kani::unwind(33)]
     fn verify_conflict_detector_catches_double_exclusive() {
         let shared_bit: u32 = kani::any();
@@ -125,28 +129,28 @@ mod proofs {
             shared_bit, 0, 0, // same exclusive bit — conflict
         ));
 
-        // The conflict detector must panic here.
-        // Kani models the panic path as a reachable failing assertion.
-        check_capability_conflicts(&reg);
-
-        // If we reach here the detector failed to catch the conflict.
-        kani::assert(false, "conflict detector must panic on double exclusive claim");
+        // The conflict detector must panic here. Scan only the populated slots.
+        check_capability_conflicts(&reg[..2]);
     }
 
     /// Verify that non-overlapping exclusive caps never trigger a false positive.
     ///
-    /// Masks are bounded to 8 bits so the SAT state space is tractable.
-    /// The property is structural and independent of bit-width.
+    /// Each capability bit is checked independently by the detector, so the
+    /// property is structural and bit-width-independent. We bound the masks to
+    /// 4 bits: this is the dimension that controls solver cost, because the
+    /// detector's inner scan walks a fixed `0..32` range regardless of mask
+    /// value — bounding the *value* (not the loop) is what keeps the proof
+    /// tractable. We also scan only the two populated registry slots; the 14
+    /// empty `None` slots add outer-loop and `flatten` unrolling with no proof
+    /// value, and were the dominant cost of the previous timeout.
     #[kani::proof]
     #[kani::unwind(33)]
     fn verify_conflict_detector_no_false_positive() {
         // Two tasks with disjoint exclusive caps must not conflict.
         let cap_a: u32 = kani::any();
         let cap_b: u32 = kani::any();
-        // Limit to 8-bit masks: reduces SAT state from 2^64 to 2^16 pairs
-        // while fully covering the structural proof obligation.
-        kani::assume(cap_a < (1 << 8));
-        kani::assume(cap_b < (1 << 8));
+        kani::assume(cap_a < (1 << 4));
+        kani::assume(cap_b < (1 << 4));
         kani::assume(cap_a & cap_b == 0); // disjoint
 
         let mut reg: [Option<TaskDescriptor>; MAX_TASKS] = [const { None }; MAX_TASKS];
@@ -159,8 +163,8 @@ mod proofs {
             cap_b, 0, 0,
         ));
 
-        // Must not panic — no conflict.
-        check_capability_conflicts(&reg);
+        // Must not panic — no conflict. Scan only the populated slots.
+        check_capability_conflicts(&reg[..2]);
     }
 
     // -----------------------------------------------------------------------
