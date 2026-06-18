@@ -72,6 +72,12 @@ noncomputable def mip (tasks : Fin n → Task) (t : Fin n) : Priority :=
 noncomputable def srp_ceiling (tasks : Fin n → Task) (c : UInt32) : Priority :=
   Finset.univ.sup fun u => if (tasks u).required_caps &&& c ≠ 0 then (tasks u).priority else 0
 
+/-- Effective scheduling priority: `max(base priority, MIP)`. Mirrors
+    `TaskDescriptor::effective_priority` in `kernel/src/memory/task.rs`. This is
+    the value the runtime scheduler actually compares. -/
+noncomputable def effective_priority (tasks : Fin n → Task) (t : Fin n) : Priority :=
+  max (tasks t).priority (mip tasks t)
+
 -- Acceptance criteria for issue #66: these elaborate against Lean 4 + Mathlib.
 #check @mip
 #check @srp_ceiling
