@@ -41,6 +41,13 @@ pub fn check_capability_conflicts(registry: &[Option<TaskDescriptor>]) {
         let Some(task) = slot else { continue };
         // Scan every bit of the u32 mask with a concrete index so `claimed`
         // is accessed by a constant offset (see module docs).
+        //
+        // clippy suggests `claimed.iter_mut().enumerate()`, but that is
+        // incorrect here: it would bound the scan to `claimed.len()` (=
+        // MAX_PERIPHERALS) and so drop the out-of-range check for bits beyond
+        // MAX_PERIPHERALS, and an iterator-derived index also defeats the
+        // concrete-offset property the Kani harness depends on.
+        #[allow(clippy::needless_range_loop)]
         for cap_id in 0..u32::BITS as usize {
             if task.exclusive_cap_mask & (1u32 << cap_id) == 0 {
                 continue;
