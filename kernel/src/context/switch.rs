@@ -11,7 +11,9 @@
 //! is what makes `mret` drop back to User mode rather than staying in Machine
 //! mode.
 
+#[cfg(target_arch = "riscv32")]
 use super::TrapFrame;
+#[cfg(target_arch = "riscv32")]
 use core::arch::global_asm;
 
 // The assembly stub saves/loads only the callee-saved set:
@@ -20,6 +22,7 @@ use core::arch::global_asm;
 //
 // Caller-saved registers (a0–a7, t0–t6) are not touched because the compiler
 // has already spilled them to the caller's stack frame before the call.
+#[cfg(target_arch = "riscv32")]
 global_asm!(
     ".section .text",
     ".global __context_switch",
@@ -74,6 +77,7 @@ global_asm!(
     "ret",
 );
 
+#[cfg(target_arch = "riscv32")]
 extern "C" {
     fn __context_switch(old: *mut TrapFrame, new: *const TrapFrame);
 }
@@ -89,6 +93,7 @@ extern "C" {
 /// values.  `new.mepc` must be a valid instruction address to resume from.
 /// Calling this before the trap-entry stub has initialised a frame (i.e.
 /// before Sprint 4's scheduler is wired up) will produce undefined behaviour.
+#[cfg(target_arch = "riscv32")]
 #[inline]
 pub unsafe fn context_switch(old: *mut TrapFrame, new: *const TrapFrame) {
     // SAFETY: delegated to caller; see function-level Safety section.
