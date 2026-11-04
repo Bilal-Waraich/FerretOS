@@ -134,6 +134,21 @@ impl<const N: usize> LineBuf<N> {
         self
     }
 
+    /// Append `v` as `0x`-prefixed, zero-padded 8-digit hexadecimal
+    /// (the same format the kernel's UART diagnostics use).
+    pub fn hex(&mut self, v: u32) -> &mut Self {
+        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+        self.str("0x");
+        for shift in (0..8).rev() {
+            if self.len == N {
+                break;
+            }
+            self.buf[self.len] = DIGITS[((v >> (shift * 4)) & 0xF) as usize];
+            self.len += 1;
+        }
+        self
+    }
+
     /// The bytes written so far.
     pub fn as_bytes(&self) -> &[u8] {
         &self.buf[..self.len]
@@ -160,6 +175,13 @@ mod tests {
         let mut b: LineBuf<32> = LineBuf::new();
         b.str("t=").u32(0).str(" ").u32(4_294_967_295);
         assert_eq!(b.as_bytes(), b"t=0 4294967295");
+    }
+
+    #[test]
+    fn line_buf_formats_hex() {
+        let mut b: LineBuf<32> = LineBuf::new();
+        b.hex(0x8008_0780).str(" ").hex(0);
+        assert_eq!(b.as_bytes(), b"0x80080780 0x00000000");
     }
 
     #[test]

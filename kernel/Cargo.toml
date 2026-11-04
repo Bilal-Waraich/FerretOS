@@ -17,6 +17,10 @@ path = "src/main.rs"
 # Maps each task's memory_start/end pair to a TOR PMP entry (R+W, M-mode only).
 # Supports up to 8 tasks (16 PMP entries, 2 per task).
 pmp = []
+# Register an extra task that deliberately writes to kernel memory, for the
+# PMP violation integration test (tests/integration/pmp_fault_test.sh).
+# With `pmp` the write must trap; without it, the write succeeds.
+fault-demo = []
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 # riscv-rt provides the low-level reset vector, stack pointer initialisation,

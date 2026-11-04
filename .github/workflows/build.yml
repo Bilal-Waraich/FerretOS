@@ -108,3 +108,8 @@ jobs:
         run: |
           cargo build --release --features pmp
           bash tests/integration/boot_test.sh
+
+      # 9. PMP violation test: a rogue task's store to kernel memory must trap
+      #    with PMP and must land without it (#89).
+      - name: PMP violation integration test
+        run: bash tests/integration/pmp_fault_test.sh

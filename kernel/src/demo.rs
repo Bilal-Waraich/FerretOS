@@ -73,6 +73,32 @@ fn probe_log_validation() {
     let _ = sys::log(msg);
 }
 
+/// Rogue task for the PMP violation test (feature `fault-demo`).
+///
+/// After its first time slice it stores to [`ferret::FAULT_PROBE_TARGET`],
+/// a kernel variable outside its region.  With `feature = "pmp"` the store
+/// raises a store access fault and the kernel halts with a diagnostic; the
+/// line after the store is only reached when nothing enforces isolation.
+#[cfg(feature = "fault-demo")]
+pub fn task_rogue() -> ! {
+    sys::sleep(30);
+    let target = core::ptr::addr_of_mut!(ferret::FAULT_PROBE_TARGET);
+    let _ = LineBuf::<80>::new()
+        .str("[F] writing to kernel memory at ")
+        .hex(target as u32)
+        .str("\n")
+        .log();
+    // SAFETY: deliberately unsound — this is the fault injection the PMP
+    // test exists to catch.  The target is a kernel-owned word reserved for
+    // this probe, so when isolation is off the stray store corrupts nothing
+    // else.
+    unsafe { core::ptr::write_volatile(target, 0xBAD0_BAD0) };
+    let _ = sys::log(b"[F] write to kernel memory SUCCEEDED: no PMP isolation\n");
+    loop {
+        sys::sleep(1000);
+    }
+}
+
 /// Idle task — runs when nothing else is ready; waits for the next interrupt.
 pub fn idle() -> ! {
     loop {
