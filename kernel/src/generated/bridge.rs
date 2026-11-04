@@ -10,7 +10,9 @@ impl TaskConfig {
     /// `id` is the unique task identifier assigned at boot.
     /// `stack_base` is the address of the statically allocated stack buffer;
     /// the initial `stack_ptr` is set to `stack_base + stack_size`.
-    pub fn into_descriptor(self, id: u8, stack_base: usize) -> TaskDescriptor {
+    /// `entry` is the task body; function pointers cannot be expressed in OML,
+    /// so the boot code supplies them at registration.
+    pub fn into_descriptor(self, id: u8, stack_base: usize, entry: fn() -> !) -> TaskDescriptor {
         TaskDescriptor::with_capabilities(
             id,
             self.priority,
@@ -22,5 +24,6 @@ impl TaskConfig {
             self.shared_cap_mask,
             self.required_cap_mask,
         )
+        .with_entry(entry as usize)
     }
 }

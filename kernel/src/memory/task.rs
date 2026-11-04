@@ -9,8 +9,9 @@ use crate::config::MAX_TASKS;
 
 /// Execution state of a task.
 ///
-/// Transitions are managed by the scheduler (Sprint 4).  During Sprint 2 and
-/// 3 all registered tasks are left in `Ready` after boot.
+/// Transitions are managed by the scheduler: `Ready → Running` on dispatch,
+/// `Running → Ready` on preemption or yield, `Running → Blocked` on sleep, and
+/// `Blocked → Ready` when the wake-up tick is reached.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskState {
     /// Task is eligible to run and waiting for the CPU.
@@ -34,10 +35,6 @@ pub enum TaskState {
 /// `stack_ptr` is a raw address that will be installed as the task's `sp`
 /// on first dispatch; it starts at `stack_base + stack_size` (top of stack).
 ///
-/// # Capability extension (Sprint 3)
-///
-/// A `held_capabilities: u32` bitmask field will be added in Sprint 3.  The
-/// `#[repr(C)]` layout means the offset of existing fields will not change.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TaskDescriptor {
@@ -53,10 +50,11 @@ pub struct TaskDescriptor {
     /// Current execution state.
     pub state: TaskState,
 
-    /// Current stack pointer address.
+    /// Saved context: address of the task's `TrapFrame` on its own stack.
     ///
-    /// Initialised to `stack_base + stack_size` (top of a downward-growing
-    /// stack).  Updated on every context switch.
+    /// Initialised to `stack_base + stack_size` (top of the stack) and
+    /// replaced by the initial frame address when the scheduler prepares the
+    /// task.  Updated on every trap taken while the task is running.
     pub stack_ptr: usize,
 
     /// Address of the first byte of the stack buffer.
@@ -100,6 +98,12 @@ pub struct TaskDescriptor {
     /// highest base priority among all tasks reachable from this task via BFS
     /// over the CCG.  `effective_priority = max(priority, max_inherited_priority)`.
     pub max_inherited_priority: u8,
+
+    /// Address of the task's entry function (`fn() -> !`).  `0` = not set.
+    pub entry: usize,
+
+    /// Tick at which a `Blocked` (sleeping) task becomes `Ready` again.
+    pub wake_at: u32,
 }
 
 impl TaskDescriptor {
@@ -129,6 +133,8 @@ impl TaskDescriptor {
             shared_cap_mask: 0,
             required_cap_mask: 0,
             max_inherited_priority: 0,
+            entry: 0,
+            wake_at: 0,
         }
     }
 
@@ -161,7 +167,15 @@ impl TaskDescriptor {
             shared_cap_mask,
             required_cap_mask,
             max_inherited_priority: 0,
+            entry: 0,
+            wake_at: 0,
         }
+    }
+
+    /// Return this descriptor with its entry point set to `entry`.
+    pub const fn with_entry(mut self, entry: usize) -> Self {
+        self.entry = entry;
+        self
     }
 
     /// Iterate over exclusive peripheral IDs held by this task.

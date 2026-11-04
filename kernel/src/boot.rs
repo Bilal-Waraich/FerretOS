@@ -2,13 +2,18 @@
 //!
 //! Compiled only for the RISC-V target (see `main.rs`).
 
+use crate::demo;
+use ferret::context::{trap, MSTATUS_MPIE, MSTATUS_MPP_MACHINE};
 use ferret::generated::demo_tasks::{TASK_H, TASK_L, TASK_M};
-use ferret::memory::task::register_task;
+use ferret::memory::task::{register_task, TaskDescriptor};
 use ferret::{capability, clint, memory, scheduler, uart};
 use riscv_rt::entry;
 
 const KERNEL_NAME: &str = "FerretOS";
 const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Base priority of the kernel-owned idle task — below every OML task.
+const IDLE_PRIORITY: u8 = 0;
 
 // ---------------------------------------------------------------------------
 // Compile-time overlap check for the three CA-PIP demo task memory regions.
@@ -22,33 +27,19 @@ const _: () = memory::assert_no_overlap::<
     0x8008_3000, 0x8008_4000,   // task H: 4 KB
 >();
 
-// ---------------------------------------------------------------------------
-// CA-PIP 3-task demo (Issue #40)
-//
-// Peripheral bitmasks:
-//   UART0 = bit 0 (peripheral ID 0)
-//
-// Task L (priority 1): holds UART0 exclusively, does slow work
-// Task M (priority 2): CPU-bound, no shared caps with L or H
-// Task H (priority 3): requires UART0, prints timestamps
-//
-// Expected CA-PIP behaviour:
-//   MIP(L) = max(H.priority) = 3  → L.effective_priority = 3
-//   L is NOT preempted by M (eff_pri 3 > M.priority 2)
-//   H runs immediately when L releases UART0
-// ---------------------------------------------------------------------------
-
-// Statically allocated stacks for the three demo tasks.
-// Each Stack<4096> lives in .bss and is zero-initialised before kernel_main.
+// Statically allocated stacks.  Each Stack<N> carries a canary at its lowest
+// address that the scheduler checks on every tick.
 static mut STACK_TASK_L: memory::Stack<4096> = memory::Stack::new();
 static mut STACK_TASK_M: memory::Stack<4096> = memory::Stack::new();
 static mut STACK_TASK_H: memory::Stack<4096> = memory::Stack::new();
+static mut STACK_IDLE: memory::Stack<1024> = memory::Stack::new();
 
 /// Boot entry point — called by riscv-rt after BSS zero-init and `.data` copy.
 ///
-/// Initialises UART diagnostics, registers demo tasks, arms the CLINT timer,
-/// enables machine-mode interrupts, then enters a counter loop that proves
-/// the interrupt path works (Issue #17).
+/// Registers the demo tasks and the idle task, validates capabilities,
+/// prepares each task's initial frame, arms the timer, and starts the
+/// highest-priority task.  Never returns: the boot stack is abandoned once
+/// the first task runs.
 #[entry]
 fn kernel_main() -> ! {
     uart::uart_puts("====================================\n");
@@ -57,102 +48,101 @@ fn kernel_main() -> ! {
     uart::uart_puts(KERNEL_NAME);
     uart::uart_puts(" v");
     uart::uart_puts(KERNEL_VERSION);
-    uart::uart_puts(" — Sprint 5 (OML integration)\n");
+    uart::uart_puts("\n");
     uart::uart_puts("Target : riscv32imac-unknown-none-elf\n");
     uart::uart_puts("Machine: QEMU virt\n");
 
     print_memory_map();
 
-    // --- Task registration (Issues #22, #23, #40) ---------------------------
+    // --- Task registration --------------------------------------------------
     // Interrupts are not yet enabled; this is the safe single-threaded boot
-    // window for populating TASK_REGISTRY.
-    //
-    // CA-PIP 3-task demo:
-    //   L (id=0, pri=1): holds UART0 exclusively, does slow work
-    //   M (id=1, pri=2): CPU-bound, no capability contention
-    //   H (id=2, pri=3): requires UART0, prints timestamps
+    // window for populating TASK_REGISTRY.  Registration order must match
+    // the slot order of MAX_INHERITED_PRIORITIES (L, M, H); the idle task is
+    // registered last and has no capabilities, so its MIP slot is 0.
     //
     // addr_of! gives the base address of each stack buffer without creating a
-    // Rust reference to the mutable static (UB-prone under Rust 2024).
-    let stack_l_base = core::ptr::addr_of!(STACK_TASK_L) as usize;
-    let stack_m_base = core::ptr::addr_of!(STACK_TASK_M) as usize;
-    let stack_h_base = core::ptr::addr_of!(STACK_TASK_H) as usize;
+    // Rust reference to the mutable static.
+    let stack_l = core::ptr::addr_of!(STACK_TASK_L) as usize;
+    let stack_m = core::ptr::addr_of!(STACK_TASK_M) as usize;
+    let stack_h = core::ptr::addr_of!(STACK_TASK_H) as usize;
+    let stack_idle = core::ptr::addr_of!(STACK_IDLE) as usize;
 
-    register_task(TASK_L.into_descriptor(0, stack_l_base));
-    register_task(TASK_M.into_descriptor(1, stack_m_base));
-    register_task(TASK_H.into_descriptor(2, stack_h_base));
+    register_task(TASK_L.into_descriptor(0, stack_l, demo::task_l));
+    register_task(TASK_M.into_descriptor(1, stack_m, demo::task_m));
+    register_task(TASK_H.into_descriptor(2, stack_h, demo::task_h));
+    register_task(
+        TaskDescriptor::new(3, IDLE_PRIORITY, stack_idle, memory::Stack::<1024>::size(), 0, 0)
+            .with_entry(demo::idle as usize),
+    );
 
-    let count = memory::task_count();
     uart::uart_puts("Tasks registered: ");
-    uart::uart_print_usize(count);
+    uart::uart_print_usize(memory::task_count());
     uart::uart_puts("\n");
 
-    // --- Capability conflict check (Issues #28, #29) -----------------------
-    // Scan all registered tasks for exclusive capability conflicts before any
-    // task runs.  Halts permanently if a conflict is found.
+    // --- Capability conflict check ----------------------------------------
+    // Halts permanently if two tasks claim the same exclusive peripheral.
     capability::check_capability_conflicts(memory::registry());
     uart::uart_puts("Capability check passed.\n");
 
-    // --- PMP configuration (feature = "pmp", closes #32) -------------------
-    // Map each task's memory region to a RISC-V PMP TOR entry.
-    // No-op when the pmp feature is not enabled.
+    // --- PMP configuration (feature = "pmp") -------------------------------
     memory::configure_pmp();
 
-    // --- Scheduler init (Issues #35, #36, #37, #38, #39) --------------------
-    // Write precomputed MIP constants, populate ready queue.
-    // Must run before interrupts are enabled.
+    // --- Scheduler init -------------------------------------------------------
+    // Write precomputed MIP constants, populate the ready queue, and build
+    // each task's first trap frame.  Tasks run in M-mode for now (MPP = M);
+    // MPIE makes interrupts come on with the first mret.
     scheduler::init();
+    let gp: usize;
+    // SAFETY: reading gp has no side effects.  Tasks are linked into the
+    // kernel image, so they must run with the kernel's global pointer.
+    unsafe { core::arch::asm!("mv {}, gp", out(reg) gp) };
+    // SAFETY: boot path, before any task runs; every registered task has an
+    // entry point and its own statically allocated stack.
+    unsafe {
+        scheduler::prepare_frames(
+            demo::task_returned as usize,
+            gp,
+            MSTATUS_MPP_MACHINE | MSTATUS_MPIE,
+        );
+    }
     uart::uart_puts("Scheduler initialised.\n");
 
     print_task_registry();
 
-    // --- Interrupt setup (Issues #14, #15) ----------------------------------
-
-    // Point mtvec at our trap entry stub.  Direct mode: bits[1:0] = 0 means
+    // --- Interrupt setup ----------------------------------------------------
+    // Point mtvec at the trap entry stub.  Direct mode: bits[1:0] = 0 means
     // all traps dispatch to the same handler address.
+    // SAFETY: __trap_entry is 4-byte aligned in the .trap section.
     unsafe {
         core::arch::asm!(
             "la t0, __trap_entry",
             "csrw mtvec, t0",
+            out("t0") _,
         );
     }
 
-    // Arm the first timer tick before enabling interrupts so the first MTIP
-    // fires at a predictable time rather than immediately.
-    clint::schedule_tick(clint::TICK_CYCLES);
+    clint::start_ticks();
 
-    // Enable the machine timer interrupt source (MTIE, mie[7]) then enable
-    // global machine-mode interrupts (MIE, mstatus[3]).  Reversing this order
-    // would open a brief window where global interrupts are on but MTIE is not
-    // yet set — harmless here but a bad habit for future critical sections.
-    // csrsi only accepts 5-bit immediates; MTIE (bit 7) and MIE (bit 3)
-    // exceed that, so we use csrs with a register-held mask instead.
+    // Enable the machine timer interrupt source (MTIE, mie[7]).  Global
+    // interrupts (mstatus.MIE) stay off on the boot stack: they come on when
+    // the first task's frame is restored, because its mstatus has MPIE set.
+    // csrsi only accepts 5-bit immediates and MTIE is bit 7, so use csrs.
+    // SAFETY: enabling an interrupt source has no effect until MIE is set.
     unsafe {
         core::arch::asm!(
-            "li   t0, 0x80",        // MTIE mask
-            "csrs mie, t0",         // set MTIE (mie[7])
-            "li   t0, 0x8",         // MIE mask
-            "csrs mstatus, t0",     // set MIE  (mstatus[3])
+            "li   t0, 0x80",
+            "csrs mie, t0",
             out("t0") _,
         );
     }
 
     uart::uart_puts("====================================\n");
-    uart::uart_puts("Interrupts enabled. Running demo.\n");
+    uart::uart_puts("Interrupts enabled. Starting tasks.\n");
     uart::uart_puts("====================================\n");
 
-    // Increment a counter; every 100 000 iterations print the value.
-    // Timer ISR fires every 1 ms and prints "[TICK N]".
-    // Interleaved output proves that mret correctly resumes this loop.
-    let mut counter: u32 = 0;
-    loop {
-        counter = counter.wrapping_add(1);
-        if counter % 100_000 == 0 {
-            uart::uart_puts("counter: ");
-            uart::uart_print_usize(counter as usize);
-            uart::uart_puts("\n");
-        }
-    }
+    // SAFETY: mtvec is set, the first task's frame was built by
+    // prepare_frames, and nothing on the boot stack is needed afterwards.
+    unsafe { trap::start_first_task(scheduler::first_frame()) }
 }
 
 /// Print the contents of the task registry over UART.
@@ -168,9 +158,9 @@ fn print_task_registry() {
         uart::uart_print_usize(task.max_inherited_priority as usize);
         uart::uart_puts("  eff_pri=");
         uart::uart_print_usize(task.effective_priority() as usize);
-        uart::uart_puts("  excl_caps=0x");
+        uart::uart_puts("  excl_caps=");
         uart::uart_print_hex(task.exclusive_cap_mask as usize);
-        uart::uart_puts("  req_caps=0x");
+        uart::uart_puts("  req_caps=");
         uart::uart_print_hex(task.required_cap_mask as usize);
         uart::uart_puts("  mem=[");
         uart::uart_print_hex(task.memory_start);

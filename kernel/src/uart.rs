@@ -4,8 +4,10 @@
 //! diagnostics and panic handler.  No receive path; no interrupt-driven TX.
 
 /// THR/LSR base address on QEMU virt (`0x1000_0000` per device tree).
+#[cfg(target_arch = "riscv32")]
 const UART_BASE: usize = 0x1000_0000;
 /// Transmit Holding Register — write one byte, DLAB=0.
+#[cfg(target_arch = "riscv32")]
 const UART_THR: usize = 0x00;
 
 /// Transmit a single byte by writing directly to the THR.
@@ -20,8 +22,14 @@ const UART_THR: usize = 0x00;
 pub unsafe fn uart_putchar(c: u8) {
     // `write_volatile` prevents the compiler from eliding the store; MMIO
     // writes have side effects that are invisible to the optimizer.
-    let thr = (UART_BASE + UART_THR) as *mut u8;
-    thr.write_volatile(c);
+    #[cfg(target_arch = "riscv32")]
+    {
+        let thr = (UART_BASE + UART_THR) as *mut u8;
+        thr.write_volatile(c);
+    }
+    // Host builds (unit tests, Kani) have no UART; output is discarded.
+    #[cfg(not(target_arch = "riscv32"))]
+    let _ = c;
 }
 
 /// Write every byte of `s` to the UART in order.

@@ -108,3 +108,20 @@ impl<const N: usize> Stack<N> {
         value == STACK_CANARY
     }
 }
+
+/// Return `true` if the canary at the bottom of the stack starting at
+/// `stack_base` is intact.
+///
+/// Address-based counterpart of [`Stack::check_canary`], used by the
+/// scheduler, which knows each task's stack only by its base address.
+///
+/// # Safety
+///
+/// `stack_base` must be the address of a live `Stack<N>` (so it is 16-byte
+/// aligned and its first 4 bytes are readable).
+pub unsafe fn canary_intact(stack_base: usize) -> bool {
+    // SAFETY: guaranteed by the caller; the volatile read stops the compiler
+    // from assuming the canary is unchanged since it was written.
+    let value = unsafe { core::ptr::read_volatile(stack_base as *const u32) };
+    value == STACK_CANARY
+}
