@@ -48,6 +48,39 @@ pub fn configure_pmp() {
     // No-op when the pmp feature is not enabled.
 }
 
+/// PMP entry used for the permissive default grant — the highest-numbered,
+/// lowest-priority entry, so any lower-numbered task entry matches first.
+pub const DEFAULT_GRANT_ENTRY: usize = 15;
+
+/// `pmpcfg` byte for the default grant: NAPOT | X | W | R.
+#[cfg(target_arch = "riscv32")]
+const DEFAULT_GRANT_CFG: usize = 0x1F;
+
+/// Grant U-mode read/write/execute access to the whole address space.
+///
+/// Without any matching PMP entry, every U-mode access faults, so tasks
+/// cannot run at all.  This entry is the baseline that lets them execute:
+/// `pmpaddr15 = all ones` in NAPOT mode covers the entire 34-bit physical
+/// address space.  It is the lowest-priority entry, so per-task entries
+/// written by [`configure_pmp`] (feature `pmp`) take precedence where they
+/// match.
+///
+/// Call once on the boot path, after [`configure_pmp`].
+pub fn grant_user_default() {
+    // SAFETY: M-mode boot path, single hart, before any U-mode code runs.
+    // pmpcfg3 byte 3 configures entry 15; csrs leaves entries 12–14 intact.
+    #[cfg(target_arch = "riscv32")]
+    unsafe {
+        core::arch::asm!(
+            "csrw pmpaddr15, {addr}",
+            "csrs pmpcfg3, {cfg}",
+            addr = in(reg) usize::MAX,
+            cfg = in(reg) DEFAULT_GRANT_CFG << 24,
+            options(nomem, nostack),
+        );
+    }
+}
+
 #[cfg(feature = "pmp")]
 mod inner {
     use crate::memory::task::registry;
@@ -58,8 +91,9 @@ mod inner {
     const PMP_ENTRIES: usize = 16;
     /// Entries per task: one for the base address, one TOR entry for the limit.
     const ENTRIES_PER_TASK: usize = 2;
-    /// Maximum tasks we can protect with PMP entries.
-    pub const MAX_PMP_TASKS: usize = PMP_ENTRIES / ENTRIES_PER_TASK; // 8
+    /// Maximum tasks we can protect with PMP entries.  Entry 15 is reserved
+    /// for the default grant (`DEFAULT_GRANT_ENTRY`), leaving 15 entries.
+    pub const MAX_PMP_TASKS: usize = (PMP_ENTRIES - 1) / ENTRIES_PER_TASK; // 7
 
     // pmpcfg byte values.
     const PMP_R:   u8 = 1 << 0; // readable
@@ -90,7 +124,7 @@ mod inner {
                 {
                     uart::uart_puts(
                         "WARNING: PMP: more tasks than PMP entries — \
-                         tasks beyond slot 7 are unprotected.\n",
+                         tasks beyond slot 6 are unprotected.\n",
                     );
                 }
                 break;

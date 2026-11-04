@@ -1,10 +1,10 @@
 //! Machine-mode trap entry/exit and the Rust-level trap dispatcher.
 //!
 //! The entry stub (`__trap_entry`) is written in assembly and placed in the
-//! `.trap` section so the linker script can locate it for `mtvec`.  It saves
-//! the full machine state into a `TrapFrame` on the interrupted task's stack,
-//! then calls the Rust [`trap_handler`] function, which returns the frame to
-//! resume.  The stub switches `sp` to that frame, restores it, and executes
+//! `.trap` section so the linker script can locate it for `mtvec`.  It
+//! switches to the running task's kernel stack (via `mscratch`), saves the
+//! full machine state into a `TrapFrame` there, then calls the Rust
+//! [`trap_handler`] function, which returns the frame to resume.  The stub switches `sp` to that frame, restores it, and executes
 //! `mret` — so returning another task's frame *is* the context switch.
 //!
 //! # Why `global_asm!` instead of `#[naked]`?
@@ -36,7 +36,14 @@ global_asm!(
     ".align 2",                     // mtvec requires 4-byte alignment
     "__trap_entry:",
 
-    // --- Allocate TrapFrame on the interrupted task's stack (144 bytes) ---
+    // --- Switch to the current task's kernel stack ---
+    // mscratch holds the kernel stack top of the running task (set by the
+    // exit path below).  Swap it with sp: sp = kernel stack top, mscratch =
+    // the interrupted sp, which may be a U-mode value the kernel must not
+    // trust as a place to write.
+    "csrrw sp, mscratch, sp",
+
+    // --- Allocate the TrapFrame at the top of the kernel stack (144 bytes) ---
     "addi sp, sp, -144",
 
     // Save all GPRs except sp.  x0 (zero) is written as 0 for index uniformity.
@@ -72,10 +79,9 @@ global_asm!(
     "sw   t5, 120(sp)",
     "sw   t6, 124(sp)",
 
-    // regs[2] must hold the interrupted context's sp, i.e. the value before
-    // the frame was allocated.  Storing the decremented sp here would make
-    // every trap return 144 bytes lower on the stack.
-    "addi t0, sp, 144",
+    // regs[2] holds the interrupted context's own sp, parked in mscratch by
+    // the swap above.
+    "csrr t0, mscratch",
     "sw   t0,   8(sp)",
 
     // Save trap CSRs using t0 as a scratch register (already saved above).
@@ -93,6 +99,13 @@ global_asm!(
     ".global __restore_context",
     "__restore_context:",
     "mv   sp, a0",
+
+    // Every frame sits exactly 144 bytes below its task's kernel stack top
+    // (traps never nest, so the kernel stack is empty when a trap starts),
+    // so the resumed task's kernel stack top is frame + 144.  Park it in
+    // mscratch for that task's next trap.
+    "addi t0, sp, 144",
+    "csrw mscratch, t0",
 
     // Restore CSRs before GPRs so that t0 is still free as scratch.
     "lw t0, 128(sp)", "csrw mepc,    t0",
@@ -144,14 +157,16 @@ extern "C" {
 /// Start executing the task whose saved frame is `frame`.  Never returns.
 ///
 /// Used once on the boot path to leave the boot stack and enter the first
-/// task: it runs the trap exit sequence, so `mret` applies the frame's
-/// `mstatus` (enabling interrupts via `MPIE`) and jumps to its `mepc`.
+/// task: it runs the trap exit sequence, so `mscratch` is pointed at the
+/// task's kernel stack and `mret` applies the frame's `mstatus` (privilege
+/// mode via `MPP`, interrupts via `MPIE`) and jumps to its `mepc`.
 ///
 /// # Safety
 ///
 /// `frame` must point to a valid frame built by [`super::init_frame`] (or
-/// saved by the trap entry stub), and `mtvec` must already point at
-/// `__trap_entry` so the first interrupt is handled.
+/// saved by the trap entry stub) located `TRAP_FRAME_SIZE` bytes below the
+/// top of its kernel stack, and `mtvec` must already point at `__trap_entry`
+/// so the first interrupt is handled.
 #[cfg(target_arch = "riscv32")]
 pub unsafe fn start_first_task(frame: *mut TrapFrame) -> ! {
     // SAFETY: delegated to the caller (see the function's Safety section).
@@ -197,6 +212,7 @@ pub unsafe extern "C" fn trap_handler(frame: *mut TrapFrame) -> *mut TrapFrame {
             // `ecall` is always a 4-byte instruction; resume after it.
             8 | 11 => {
                 f.mepc += 4;
+                crate::scheduler::note_syscall_mode(cause_code == 8);
                 crate::syscall::dispatch(frame)
             }
             _ => fault_and_halt(f),

@@ -24,6 +24,17 @@ pub enum TaskState {
     Suspended,
 }
 
+/// Privilege mode a task executes in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskMode {
+    /// User mode: memory access is constrained by PMP and kernel services are
+    /// reached only through `ecall`.  The default for every OML task.
+    User,
+    /// Machine mode: reserved for kernel-owned tasks (the idle task, which
+    /// needs `wfi`, illegal in U-mode on QEMU).
+    Machine,
+}
+
 /// Describes a single task: identity, scheduling priority, and memory layout.
 ///
 /// `#[repr(C)]` is required for predictable field offsets when the Sprint 4
@@ -104,6 +115,9 @@ pub struct TaskDescriptor {
 
     /// Tick at which a `Blocked` (sleeping) task becomes `Ready` again.
     pub wake_at: u32,
+
+    /// Privilege mode the task runs in.
+    pub mode: TaskMode,
 }
 
 impl TaskDescriptor {
@@ -135,6 +149,7 @@ impl TaskDescriptor {
             max_inherited_priority: 0,
             entry: 0,
             wake_at: 0,
+            mode: TaskMode::User,
         }
     }
 
@@ -169,7 +184,14 @@ impl TaskDescriptor {
             max_inherited_priority: 0,
             entry: 0,
             wake_at: 0,
+            mode: TaskMode::User,
         }
+    }
+
+    /// Return this descriptor with its privilege mode set to `mode`.
+    pub const fn with_mode(mut self, mode: TaskMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     /// Return this descriptor with its entry point set to `entry`.
