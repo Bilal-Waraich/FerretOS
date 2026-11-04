@@ -4,7 +4,28 @@
 //! Each wrapper issues one `ecall`; the kernel side is [`crate::syscall`].
 //! On non-RISC-V builds (host tests, Kani) the wrappers are inert stubs.
 
-use crate::syscall::{SYS_LOG, SYS_NOW, SYS_SLEEP, SYS_YIELD};
+use crate::syscall::{EFAULT, ENOSYS, EPERM, SYS_LOG, SYS_NOW, SYS_SLEEP, SYS_YIELD};
+
+/// Error returned by a syscall.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SysError {
+    /// Unknown syscall number.
+    NoSys,
+    /// The caller lacks the required capability.
+    Permission,
+    /// A buffer argument is not readable by the caller.
+    Fault,
+}
+
+/// Decode a raw syscall return value.
+fn decode(ret: usize) -> Result<usize, SysError> {
+    match ret {
+        ENOSYS => Err(SysError::NoSys),
+        EPERM => Err(SysError::Permission),
+        EFAULT => Err(SysError::Fault),
+        n => Ok(n),
+    }
+}
 
 #[inline(always)]
 fn ecall(n: usize, a0: usize, a1: usize) -> usize {
@@ -44,8 +65,19 @@ pub fn sleep(ticks: u32) {
 }
 
 /// Write `bytes` to the console as one uninterrupted unit.
-pub fn log(bytes: &[u8]) {
-    ecall(SYS_LOG, bytes.as_ptr() as usize, bytes.len());
+///
+/// Requires the console capability.  Returns the number of bytes written
+/// (messages longer than `LOG_MAX_LEN` are truncated).
+pub fn log(bytes: &[u8]) -> Result<usize, SysError> {
+    log_raw(bytes.as_ptr() as usize, bytes.len())
+}
+
+/// `log` taking a raw address and length.
+///
+/// Safe to call with any values: the kernel validates the buffer and returns
+/// [`SysError::Fault`] if the caller could not read it itself.
+pub fn log_raw(addr: usize, len: usize) -> Result<usize, SysError> {
+    decode(ecall(SYS_LOG, addr, len))
 }
 
 /// Return the number of timer ticks since boot.
@@ -108,8 +140,8 @@ impl<const N: usize> LineBuf<N> {
     }
 
     /// Send the buffer to the console with [`log`].
-    pub fn log(&self) {
-        log(self.as_bytes());
+    pub fn log(&self) -> Result<usize, SysError> {
+        log(self.as_bytes())
     }
 }
 
@@ -135,5 +167,18 @@ mod tests {
         let mut b: LineBuf<4> = LineBuf::new();
         b.str("abc").u32(123);
         assert_eq!(b.as_bytes(), b"abc1");
+    }
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    #[test]
+    fn decode_maps_error_codes() {
+        assert_eq!(decode(ENOSYS), Err(SysError::NoSys));
+        assert_eq!(decode(EPERM), Err(SysError::Permission));
+        assert_eq!(decode(EFAULT), Err(SysError::Fault));
+        assert_eq!(decode(42), Ok(42));
     }
 }

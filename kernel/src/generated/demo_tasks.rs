@@ -8,7 +8,7 @@ pub static TASK_L: TaskConfig = TaskConfig {
 	memory_start: 0x8008_1000,
 	memory_end: 0x8008_2000,
 	exclusive_cap_mask: 0x0000_0001,
-	shared_cap_mask: 0,
+	shared_cap_mask: 0x8000_0000,
 	required_cap_mask: 0,
 };
 
@@ -18,7 +18,7 @@ pub static TASK_M: TaskConfig = TaskConfig {
 	memory_start: 0x8008_2000,
 	memory_end: 0x8008_3000,
 	exclusive_cap_mask: 0,
-	shared_cap_mask: 0,
+	shared_cap_mask: 0x8000_0000,
 	required_cap_mask: 0,
 };
 
@@ -28,6 +28,6 @@ pub static TASK_H: TaskConfig = TaskConfig {
 	memory_start: 0x8008_3000,
 	memory_end: 0x8008_4000,
 	exclusive_cap_mask: 0,
-	shared_cap_mask: 0,
+	shared_cap_mask: 0x8000_0000,
 	required_cap_mask: 0x0000_0001,
 };

@@ -1,7 +1,9 @@
 // CA-PIP three-task demo definitions.
 //
-// Peripheral bitmasks (one-hot encoding, matches kernel/src/main.rs):
-//   UART0 = bit 0  (exclusive_cap_mask = 0x0000_0001)
+// Peripheral bitmasks (one-hot encoding, matches kernel/src/demo.rs):
+//   UART0   = bit 0   (exclusive_cap_mask = 0x0000_0001)
+//   CONSOLE = bit 31  (shared_cap_mask = 0x8000_0000) — permission to use the
+//             `log` syscall; shared, so it creates no CCG edges.
 //
 // Expected CA-PIP behaviour after boot:
 //   MIP(L) = max(H.priority) = 3  →  eff_pri(L) = 3
@@ -22,7 +24,7 @@ instance TASK_L: TaskConfig {
     memory_start = 0x8008_1000;
     memory_end = 0x8008_2000;
     exclusive_cap_mask = 0x0000_0001;
-    shared_cap_mask = 0;
+    shared_cap_mask = 0x8000_0000;
     required_cap_mask = 0;
 }
 
@@ -34,7 +36,7 @@ instance TASK_M: TaskConfig {
     memory_start = 0x8008_2000;
     memory_end = 0x8008_3000;
     exclusive_cap_mask = 0;
-    shared_cap_mask = 0;
+    shared_cap_mask = 0x8000_0000;
     required_cap_mask = 0;
 }
 
@@ -47,6 +49,6 @@ instance TASK_H: TaskConfig {
     memory_start = 0x8008_3000;
     memory_end = 0x8008_4000;
     exclusive_cap_mask = 0;
-    shared_cap_mask = 0;
+    shared_cap_mask = 0x8000_0000;
     required_cap_mask = 0x0000_0001;
 }

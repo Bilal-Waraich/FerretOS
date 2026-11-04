@@ -469,6 +469,17 @@ pub fn sleep_current(frame: *mut TrapFrame, ticks: u32) -> *mut TrapFrame {
     dispatch_next()
 }
 
+/// Copy of the running task's descriptor, or `None` before the first dispatch.
+pub fn current_task() -> Option<TaskDescriptor> {
+    let t = task_ptr(current_task_idx());
+    if t.is_null() {
+        return None;
+    }
+    // SAFETY: `t` points into the registry; descriptors are `Copy`, read on
+    // the trap path with interrupts disabled.
+    Some(unsafe { *t })
+}
+
 /// Return the registry index of the currently running task.
 pub fn current_task_idx() -> u8 {
     // SAFETY: read of a single byte via raw pointer; no torn read possible on RV32.

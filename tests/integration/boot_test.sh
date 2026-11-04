@@ -110,6 +110,7 @@ assert_contains "task L finishes"    "[L] work end"         "$LOG"
 assert_contains "task M runs"        "[M] run"              "$LOG"
 assert_contains "task H runs"        "[H] run"              "$LOG"
 assert_contains "switch latency"     "Switch latency"       "$LOG"
+assert_contains "log validation"     "log of kernel memory rejected (EFAULT)" "$LOG"
 assert_absent   "no faults"          "[FAULT]"              "$LOG"
 assert_absent   "no panics"          "KERNEL PANIC"         "$LOG"
 
