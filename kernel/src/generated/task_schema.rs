@@ -22,4 +22,6 @@ pub struct TaskConfig {
 	pub exclusive_cap_mask: u32,
 	pub shared_cap_mask: u32,
 	pub required_cap_mask: u32,
+	pub sends_mask: u32,
+	pub receives_mask: u32,
 }

@@ -148,6 +148,11 @@ fn kernel_main() -> ! {
     capability::check_capability_conflicts(memory::registry());
     uart::uart_puts("Capability check passed.\n");
 
+    // --- Channel endpoint check ----------------------------------------------
+    // Halts if two tasks claim the same sender or receiver endpoint.
+    capability::check_channel_conflicts(memory::registry());
+    uart::uart_puts("Channel check passed.\n");
+
     // --- PMP configuration ------------------------------------------------
     // feature = "pmp": flash R+X, and the running task's region R+W
     // (reprogrammed on every switch).  Otherwise a permissive grant so U-mode

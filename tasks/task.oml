@@ -8,6 +8,11 @@
 //   uint8 / uint32  — primitive integer types (no heap allocation, no_std safe)
 //   enum            — Peripheral resource identifier
 //
+// Channel endpoints (Sprint 9): bit i of sends_mask / receives_mask means the
+// task holds SenderCapability<i> / ReceiverCapability<i>.  Channel IDs are
+// 0..MAX_CHANNELS (8).  Message types are declared on the Rust Channel<T, CAP>
+// statics; OML has no type-parameterised field syntax for them.
+//
 // Planned OML extensions (tracked in the OML repo):
 //   const modifier             — marks fields immutable after construction
 //   hex integer literals       — e.g. memory_start: uint32 = 0x8008_1000
@@ -38,4 +43,6 @@ struct TaskConfig {
     public uint32 exclusive_cap_mask;
     public uint32 shared_cap_mask;
     public uint32 required_cap_mask;
+    public uint32 sends_mask;
+    public uint32 receives_mask;
 }

@@ -24,6 +24,7 @@ impl TaskConfig {
             self.shared_cap_mask,
             self.required_cap_mask,
         )
+        .with_channels(self.sends_mask, self.receives_mask)
         .with_entry(entry as usize)
     }
 }
