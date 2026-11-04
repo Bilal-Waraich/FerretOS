@@ -62,10 +62,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y qemu-system-misc
 
+      # 5a. Build the pinned OML transpiler from the submodule so that the
+      #     kernel build regenerates src/generated/ from tasks/*.oml.
+      - name: Build OML transpiler
+        run: |
+          rustup toolchain install stable --profile minimal
+          bash scripts/build_oml.sh
+
       # 5. Build the kernel in release mode.  The .cargo/config.toml sets the
       #    default target and linker flags so we don't need extra arguments here.
       - name: Build kernel (release)
         run: cargo build --release
+
+      # 5b. The committed generated files must match what OML produces from
+      #     tasks/*.oml; a difference means someone edited one without the other.
+      - name: Check generated files are up to date
+        run: git diff --exit-code kernel/src/generated/
 
       # 6. Run QEMU with a 5-second timeout and capture all serial output.
       #    We check that the boot banner appears in the log to confirm the

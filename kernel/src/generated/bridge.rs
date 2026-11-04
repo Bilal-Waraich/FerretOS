@@ -12,7 +12,7 @@ impl TaskConfig {
     /// the initial `stack_ptr` is set to `stack_base + stack_size`.
     /// `entry` is the task body; function pointers cannot be expressed in OML,
     /// so the boot code supplies them at registration.
-    pub fn into_descriptor(self, id: u8, stack_base: usize, entry: fn() -> !) -> TaskDescriptor {
+    pub fn into_descriptor(&self, id: u8, stack_base: usize, entry: fn() -> !) -> TaskDescriptor {
         TaskDescriptor::with_capabilities(
             id,
             self.priority,

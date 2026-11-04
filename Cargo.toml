@@ -7,6 +7,9 @@
 [workspace]
 resolver = "2"
 members = ["kernel"]
+# The OML transpiler is a git submodule with its own workspace; it is built
+# separately (scripts/build_oml.sh) and must not join this one.
+exclude = ["oml"]
 
 # Release profile tuned for size — lives at workspace root so it actually applies.
 # Cargo ignores profile settings in non-root package Cargo.toml files.
