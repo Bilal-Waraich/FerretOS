@@ -19,6 +19,13 @@ pub mod kani_proofs;
 pub mod memory;
 pub mod scheduler;
 pub mod uart;
+
+// The build-time CCG generator (kernel/build/ccg_gen.rs) is host code used by
+// build.rs; compiling it into the host test build lets its unit tests run and
+// lets them cross-check it against the in-kernel algorithm.
+#[cfg(test)]
+#[path = "../build/ccg_gen.rs"]
+mod ccg_gen;
 pub mod sys;
 pub mod syscall;
 
