@@ -89,6 +89,10 @@ pub const REG_GP: usize = 3;
 pub const REG_A0: usize = 10;
 /// Register index of `a1` (x11).
 pub const REG_A1: usize = 11;
+/// Register index of `a2` (x12).
+pub const REG_A2: usize = 12;
+/// Register index of `a3` (x13).
+pub const REG_A3: usize = 13;
 /// Register index of `a7` (x17) — syscall number.
 pub const REG_A7: usize = 17;
 

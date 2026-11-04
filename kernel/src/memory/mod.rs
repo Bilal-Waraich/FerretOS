@@ -18,4 +18,4 @@ pub mod task;
 pub use pmp::{activate_task_region, configure_pmp};
 pub use region::{MemoryRegion, assert_no_overlap};
 pub use stack::Stack;
-pub use task::{TaskDescriptor, TaskMode, TaskState, register_task, registry, task_count};
+pub use task::{BlockReason, TaskDescriptor, TaskMode, TaskState, register_task, registry, task_count};

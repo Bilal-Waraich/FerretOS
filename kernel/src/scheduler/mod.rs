@@ -36,11 +36,13 @@ pub mod queue;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ipc_tests;
 
 use crate::config::MAX_TASKS;
 use crate::context::TrapFrame;
 use crate::generated::ccg_constants::MAX_INHERITED_PRIORITIES;
-use crate::memory::task::{task_count, task_registry_ptr, TaskDescriptor, TaskMode, TaskState};
+use crate::memory::task::{task_count, task_registry_ptr, BlockReason, TaskDescriptor, TaskMode, TaskState};
 use queue::PriorityQueue;
 
 /// Time quantum in timer ticks (1 tick = 1 ms by default).
@@ -190,7 +192,11 @@ fn write_precomputed_mip() {
 /// enabled (single-threaded boot path).
 pub fn init() {
     write_precomputed_mip();
+    populate_ready_queue();
+}
 
+/// Enqueue every `Ready` task and make the best one current.
+pub(crate) fn populate_ready_queue() {
     // SAFETY: single-threaded boot path; no trap can fire yet.
     unsafe {
         let rq = core::ptr::addr_of_mut!(READY_QUEUE);
@@ -360,8 +366,13 @@ fn wake_sleepers(now: u32) {
         let t = task_ptr(i as u8);
         // SAFETY: trap path, interrupts disabled, single hart.
         unsafe {
-            if !t.is_null() && (*t).state == TaskState::Blocked && tick_reached(now, (*t).wake_at) {
+            if !t.is_null()
+                && (*t).state == TaskState::Blocked
+                && (*t).blocked_on == BlockReason::Sleep
+                && tick_reached(now, (*t).wake_at)
+            {
                 (*t).state = TaskState::Ready;
+                (*t).blocked_on = BlockReason::None;
                 (*core::ptr::addr_of_mut!(READY_QUEUE)).insert(i as u8, (*t).effective_priority());
             }
         }
@@ -477,9 +488,68 @@ pub fn sleep_current(frame: *mut TrapFrame, ticks: u32) -> *mut TrapFrame {
         // SAFETY: trap path, interrupts disabled, single hart.
         unsafe {
             (*t).state = TaskState::Blocked;
+            (*t).blocked_on = BlockReason::Sleep;
             (*t).wake_at = crate::clint::ticks().wrapping_add(ticks.max(1));
         }
     }
+    dispatch_next()
+}
+
+/// Block the running task on `reason` and dispatch the best ready task.
+///
+/// Used by the channel syscalls; the caller has already arranged for the
+/// blocked syscall to be re-executed when the task resumes.
+pub fn block_current(frame: *mut TrapFrame, reason: BlockReason) -> *mut TrapFrame {
+    save_current(frame);
+    let t = task_ptr(current_task_idx());
+    if !t.is_null() {
+        // SAFETY: trap path, interrupts disabled, single hart.
+        unsafe {
+            (*t).state = TaskState::Blocked;
+            (*t).blocked_on = reason;
+        }
+    }
+    dispatch_next()
+}
+
+/// Make the task blocked on `reason` (if any) ready again.
+///
+/// Channels are single-producer / single-consumer (#76), so at most one task
+/// can be blocked on a given `Send(ch)` or `Receive(ch)`.  Returns the woken
+/// task's registry index.  O(N).
+pub fn wake_blocked_on(reason: BlockReason) -> Option<u8> {
+    for i in 0..task_count() {
+        let t = task_ptr(i as u8);
+        // SAFETY: trap path, interrupts disabled, single hart.
+        unsafe {
+            if !t.is_null() && (*t).state == TaskState::Blocked && (*t).blocked_on == reason {
+                (*t).state = TaskState::Ready;
+                (*t).blocked_on = BlockReason::None;
+                (*core::ptr::addr_of_mut!(READY_QUEUE)).insert(i as u8, (*t).effective_priority());
+                return Some(i as u8);
+            }
+        }
+    }
+    None
+}
+
+/// After a wake-up, switch to the best ready task if it outranks the caller.
+///
+/// Returns `frame` (the caller continues) or the frame of the task that now
+/// runs.  This is what makes a woken high-priority consumer run *immediately*
+/// when data arrives, instead of waiting for the next tick.
+pub fn preempt_if_outranked(frame: *mut TrapFrame) -> *mut TrapFrame {
+    // SAFETY: trap path, interrupts disabled, single hart.
+    unsafe {
+        let rq = core::ptr::addr_of_mut!(READY_QUEUE);
+        let cur = task_ptr(current_task_idx());
+        let cur_eff = if cur.is_null() { 0 } else { (*cur).effective_priority() };
+        if (*rq).is_empty() || (*rq).peek_max_priority() <= cur_eff {
+            return frame;
+        }
+    }
+    save_current(frame);
+    requeue_current();
     dispatch_next()
 }
 
@@ -499,3 +569,19 @@ pub fn current_task_idx() -> u8 {
     // SAFETY: read of a single byte via raw pointer; no torn read possible on RV32.
     unsafe { *core::ptr::addr_of!(CURRENT_TASK_IDX) }
 }
+
+/// Reset all scheduler and registry state (host unit tests only).
+#[cfg(test)]
+pub(crate) fn reset_for_test() {
+    // SAFETY: tests that touch global scheduler state hold `TEST_LOCK`.
+    unsafe {
+        *core::ptr::addr_of_mut!(READY_QUEUE) = PriorityQueue::new();
+        *core::ptr::addr_of_mut!(CURRENT_TASK_IDX) = NO_TASK;
+        *core::ptr::addr_of_mut!(TICKS_SINCE_SWITCH) = 0;
+    }
+    crate::memory::task::reset_registry_for_test();
+}
+
+/// Serialises host tests that use the global registry and scheduler.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

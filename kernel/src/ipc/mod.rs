@@ -8,7 +8,10 @@
 //! # Modules
 //!
 //! - [`channel`] — the `Channel<T, CAP>` ring buffer and the endpoint tokens.
+//! - [`kernel`]  — the kernel's channel table behind the `send` / `receive`
+//!   syscalls (tasks in U-mode cannot share memory with each other).
 
 pub mod channel;
+pub mod kernel;
 
 pub use channel::{Channel, ReceiverCapability, SenderCapability};

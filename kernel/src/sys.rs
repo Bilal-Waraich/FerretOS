@@ -4,7 +4,11 @@
 //! Each wrapper issues one `ecall`; the kernel side is [`crate::syscall`].
 //! On non-RISC-V builds (host tests, Kani) the wrappers are inert stubs.
 
-use crate::syscall::{EFAULT, ENOSYS, EPERM, SYS_LOG, SYS_NOW, SYS_SLEEP, SYS_YIELD};
+use crate::ipc::{ReceiverCapability, SenderCapability};
+use crate::syscall::{
+    EAGAIN, EFAULT, EINVAL, ENOSYS, EPERM, FLAG_NONBLOCK, SYS_LOG, SYS_NOW, SYS_RECEIVE,
+    SYS_SEND, SYS_SLEEP, SYS_YIELD,
+};
 
 /// Error returned by a syscall.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,8 +17,12 @@ pub enum SysError {
     NoSys,
     /// The caller lacks the required capability.
     Permission,
-    /// A buffer argument is not readable by the caller.
+    /// A buffer argument is not accessible by the caller.
     Fault,
+    /// The operation would block (non-blocking variant only).
+    WouldBlock,
+    /// An argument is out of range.
+    Invalid,
 }
 
 /// Decode a raw syscall return value.
@@ -23,12 +31,19 @@ fn decode(ret: usize) -> Result<usize, SysError> {
         ENOSYS => Err(SysError::NoSys),
         EPERM => Err(SysError::Permission),
         EFAULT => Err(SysError::Fault),
+        EAGAIN => Err(SysError::WouldBlock),
+        EINVAL => Err(SysError::Invalid),
         n => Ok(n),
     }
 }
 
 #[inline(always)]
 fn ecall(n: usize, a0: usize, a1: usize) -> usize {
+    ecall4(n, a0, a1, 0, 0)
+}
+
+#[inline(always)]
+fn ecall4(n: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> usize {
     #[cfg(target_arch = "riscv32")]
     {
         let ret: usize;
@@ -41,6 +56,8 @@ fn ecall(n: usize, a0: usize, a1: usize) -> usize {
                 "ecall",
                 inlateout("a0") a0 => ret,
                 in("a1") a1,
+                in("a2") a2,
+                in("a3") a3,
                 in("a7") n,
                 options(nostack),
             );
@@ -49,7 +66,7 @@ fn ecall(n: usize, a0: usize, a1: usize) -> usize {
     }
     #[cfg(not(target_arch = "riscv32"))]
     {
-        let _ = (n, a1);
+        let _ = (n, a1, a2, a3);
         a0
     }
 }
@@ -83,6 +100,37 @@ pub fn log_raw(addr: usize, len: usize) -> Result<usize, SysError> {
 /// Return the number of timer ticks since boot.
 pub fn now() -> u32 {
     ecall(SYS_NOW, 0, 0) as u32
+}
+
+impl<const ID: usize> SenderCapability<ID> {
+    /// Send `bytes` (at most `ipc::kernel::MSG_MAX`) on channel `ID`,
+    /// blocking while the channel is full.
+    ///
+    /// The token is the type-level permission; the kernel independently
+    /// checks the task's boot-validated `sends_mask`.
+    pub fn send(&self, bytes: &[u8]) -> Result<(), SysError> {
+        decode(ecall4(SYS_SEND, ID, bytes.as_ptr() as usize, bytes.len(), 0)).map(|_| ())
+    }
+
+    /// As [`send`](Self::send), but returns [`SysError::WouldBlock`] when full.
+    pub fn try_send(&self, bytes: &[u8]) -> Result<(), SysError> {
+        decode(ecall4(SYS_SEND, ID, bytes.as_ptr() as usize, bytes.len(), FLAG_NONBLOCK)).map(|_| ())
+    }
+}
+
+impl<const ID: usize> ReceiverCapability<ID> {
+    /// Receive one message from channel `ID` into `buf`, blocking while the
+    /// channel is empty.  Returns the message length; a message longer than
+    /// `buf` is truncated.
+    pub fn receive(&self, buf: &mut [u8]) -> Result<usize, SysError> {
+        decode(ecall4(SYS_RECEIVE, ID, buf.as_mut_ptr() as usize, buf.len(), 0))
+    }
+
+    /// As [`receive`](Self::receive), but returns [`SysError::WouldBlock`]
+    /// when the channel is empty.
+    pub fn try_receive(&self, buf: &mut [u8]) -> Result<usize, SysError> {
+        decode(ecall4(SYS_RECEIVE, ID, buf.as_mut_ptr() as usize, buf.len(), FLAG_NONBLOCK))
+    }
 }
 
 /// Fixed-capacity line buffer for building log messages without allocation.
