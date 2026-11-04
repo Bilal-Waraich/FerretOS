@@ -118,6 +118,12 @@ pub struct TaskDescriptor {
 
     /// Privilege mode the task runs in.
     pub mode: TaskMode,
+
+    /// Channels this task sends on: bit `i` = holds `SenderCapability<i>`.
+    pub sends_mask: u32,
+
+    /// Channels this task receives on: bit `i` = holds `ReceiverCapability<i>`.
+    pub receives_mask: u32,
 }
 
 impl TaskDescriptor {
@@ -150,6 +156,8 @@ impl TaskDescriptor {
             entry: 0,
             wake_at: 0,
             mode: TaskMode::User,
+            sends_mask: 0,
+            receives_mask: 0,
         }
     }
 
@@ -185,7 +193,16 @@ impl TaskDescriptor {
             entry: 0,
             wake_at: 0,
             mode: TaskMode::User,
+            sends_mask: 0,
+            receives_mask: 0,
         }
+    }
+
+    /// Return this descriptor with its channel endpoint masks set.
+    pub const fn with_channels(mut self, sends_mask: u32, receives_mask: u32) -> Self {
+        self.sends_mask = sends_mask;
+        self.receives_mask = receives_mask;
+        self
     }
 
     /// Return this descriptor with its privilege mode set to `mode`.

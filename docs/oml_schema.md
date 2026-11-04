@@ -25,6 +25,8 @@ struct TaskConfig {
     public uint32 exclusive_cap_mask;
     public uint32 shared_cap_mask;
     public uint32 required_cap_mask;
+    public uint32 sends_mask;
+    public uint32 receives_mask;
 }
 ```
 
@@ -39,6 +41,13 @@ struct TaskConfig {
 | `exclusive_cap_mask` | `uint32` | One-hot bitmask of peripherals this task holds exclusively. Bit `i` = peripheral ID `i`. No two tasks may share a set bit — the boot-time conflict detector halts if they do. |
 | `shared_cap_mask` | `uint32` | One-hot bitmask of peripherals this task holds in shared (read-only) mode. Shared access does not create CCG edges. |
 | `required_cap_mask` | `uint32` | One-hot bitmask of peripherals this task requires but does not currently hold. Used by the CCG builder: an edge L → H is added when `L.exclusive_cap_mask & H.required_cap_mask != 0`. |
+| `sends_mask` | `uint32` | Bit `i` set = the task holds `SenderCapability<i>` for channel `i` (`i < MAX_CHANNELS` = 8). At most one task may hold each sender endpoint; boot halts with `CHANNEL CONFLICT` otherwise. |
+| `receives_mask` | `uint32` | Bit `i` set = the task holds `ReceiverCapability<i>`. At most one task per receiver endpoint. |
+
+Channel message types are not part of the schema: they are fixed by the Rust
+`Channel<T, CAP>` static for each channel ID. OML has no syntax for a
+type-parameterised field such as `sends: Channel(0, SensorReading)`, so the
+endpoint masks carry only the IDs.
 
 ### Peripheral bitmask encoding
 

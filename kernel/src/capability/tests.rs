@@ -78,3 +78,48 @@ fn test_none_slots_ignored() {
     ];
     check_capability_conflicts(&registry);
 }
+
+// ---------------------------------------------------------------------------
+// Channel endpoint conflicts (#76)
+// ---------------------------------------------------------------------------
+
+use crate::capability::allocator::check_channel_conflicts;
+
+fn chan_task(id: u8, sends: u32, receives: u32) -> Option<TaskDescriptor> {
+    Some(TaskDescriptor::new(id, 1, 0, 16, 0, 0).with_channels(sends, receives))
+}
+
+#[test]
+fn pipeline_endpoints_pass() {
+    // sensor -> ch0 -> filter -> ch1 -> logger
+    let reg = [chan_task(0, 0b01, 0), chan_task(1, 0b10, 0b01), chan_task(2, 0, 0b10)];
+    check_channel_conflicts(&reg);
+}
+
+#[test]
+fn task_may_hold_both_ends_of_different_channels() {
+    check_channel_conflicts(&[chan_task(0, 0b01, 0b10), chan_task(1, 0b10, 0b01)]);
+}
+
+#[test]
+#[should_panic(expected = "CHANNEL CONFLICT: sender of channel 0 claimed by task 0 and task 1")]
+fn two_senders_on_one_channel_halt() {
+    check_channel_conflicts(&[chan_task(0, 0b1, 0), chan_task(1, 0b1, 0)]);
+}
+
+#[test]
+#[should_panic(expected = "CHANNEL CONFLICT: receiver of channel 3 claimed by task 1 and task 2")]
+fn two_receivers_on_one_channel_halt() {
+    check_channel_conflicts(&[chan_task(0, 1 << 3, 0), chan_task(1, 0, 1 << 3), chan_task(2, 0, 1 << 3)]);
+}
+
+#[test]
+#[should_panic(expected = "CHANNEL ERROR: sender channel ID 8 out of range")]
+fn channel_id_beyond_max_channels_halts() {
+    check_channel_conflicts(&[chan_task(0, 1 << 8, 0)]);
+}
+
+#[test]
+fn empty_registry_passes_channel_check() {
+    check_channel_conflicts(&[None, None]);
+}

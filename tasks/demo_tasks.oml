@@ -30,6 +30,8 @@ instance TASK_L: TaskConfig {
     exclusive_cap_mask = 0x0000_0001;
     shared_cap_mask = 0x8000_0000;
     required_cap_mask = 0;
+    sends_mask = 0;
+    receives_mask = 0;
 }
 
 // --- Task M — medium priority, CPU-bound ---------------------------------
@@ -42,6 +44,8 @@ instance TASK_M: TaskConfig {
     exclusive_cap_mask = 0;
     shared_cap_mask = 0x8000_0000;
     required_cap_mask = 0;
+    sends_mask = 0;
+    receives_mask = 0;
 }
 
 // --- Task H — high priority waiter ---------------------------------------
@@ -55,4 +59,6 @@ instance TASK_H: TaskConfig {
     exclusive_cap_mask = 0;
     shared_cap_mask = 0x8000_0000;
     required_cap_mask = 0x0000_0001;
+    sends_mask = 0;
+    receives_mask = 0;
 }

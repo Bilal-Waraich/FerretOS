@@ -18,7 +18,7 @@
 //! flows through an iterator adapter is treated as symbolic by the model
 //! checker, turning every array write into a 32-way array-theory update.
 
-use crate::config::MAX_PERIPHERALS;
+use crate::config::{MAX_CHANNELS, MAX_PERIPHERALS};
 use crate::memory::task::TaskDescriptor;
 #[cfg(not(any(test, kani)))]
 use crate::uart;
@@ -122,4 +122,102 @@ fn report_out_of_range_and_halt(cap_id: usize, task_id: u8) -> ! {
         "CAPABILITY ERROR: peripheral ID {} out of range in task {}",
         cap_id, task_id
     );
+}
+
+/// Which end of a channel a conflict concerns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Endpoint {
+    /// `SenderCapability<ID>`.
+    Sender,
+    /// `ReceiverCapability<ID>`.
+    Receiver,
+}
+
+impl Endpoint {
+    fn name(self) -> &'static str {
+        match self {
+            Endpoint::Sender => "sender",
+            Endpoint::Receiver => "receiver",
+        }
+    }
+}
+
+/// Check that every channel endpoint is held by at most one task.
+///
+/// A channel is single-producer / single-consumer: its lock-free ring buffer
+/// is only sound when exactly one task sends and one receives.  The sender
+/// and receiver capability tokens are ZSTs with no runtime identity, so this
+/// boot-time scan of `sends_mask` / `receives_mask` is what enforces their
+/// uniqueness.  Also rejects channel IDs `>= MAX_CHANNELS`.
+///
+/// O(N × C) with N ≤ MAX_TASKS and C = 32 bits per mask.
+///
+/// # Panics / halts
+///
+/// On a duplicate endpoint or out-of-range ID, prints a UART diagnostic and
+/// spins forever (panics under `cfg(test)` / `cfg(kani)`).
+pub fn check_channel_conflicts(registry: &[Option<TaskDescriptor>]) {
+    let mut senders: [Option<u8>; MAX_CHANNELS] = [None; MAX_CHANNELS];
+    let mut receivers: [Option<u8>; MAX_CHANNELS] = [None; MAX_CHANNELS];
+
+    for slot in registry {
+        let Some(task) = slot else { continue };
+        // Concrete-index scan, as in check_capability_conflicts, so that
+        // out-of-range bits are seen and Kani sees constant offsets.
+        #[allow(clippy::needless_range_loop)]
+        for id in 0..u32::BITS as usize {
+            for (mask, owners, end) in [
+                (task.sends_mask, &mut senders, Endpoint::Sender),
+                (task.receives_mask, &mut receivers, Endpoint::Receiver),
+            ] {
+                if mask & (1u32 << id) == 0 {
+                    continue;
+                }
+                if id >= MAX_CHANNELS {
+                    report_channel_and_halt(end, id, task.id, None);
+                }
+                if let Some(prior) = owners[id] {
+                    report_channel_and_halt(end, id, task.id, Some(prior));
+                }
+                owners[id] = Some(task.id);
+            }
+        }
+    }
+}
+
+/// Print a channel-endpoint diagnostic and halt.  `prior` is the task that
+/// already holds the endpoint, or `None` for an out-of-range ID.
+fn report_channel_and_halt(end: Endpoint, id: usize, task: u8, prior: Option<u8>) -> ! {
+    #[cfg(not(any(test, kani)))]
+    {
+        match prior {
+            Some(p) => {
+                uart::uart_puts("CHANNEL CONFLICT: ");
+                uart::uart_puts(end.name());
+                uart::uart_puts(" of channel ");
+                uart::uart_print_usize(id);
+                uart::uart_puts(" claimed by task ");
+                uart::uart_print_usize(p as usize);
+                uart::uart_puts(" and task ");
+                uart::uart_print_usize(task as usize);
+            }
+            None => {
+                uart::uart_puts("CHANNEL ERROR: ");
+                uart::uart_puts(end.name());
+                uart::uart_puts(" channel ID ");
+                uart::uart_print_usize(id);
+                uart::uart_puts(" out of range (MAX_CHANNELS=");
+                uart::uart_print_usize(MAX_CHANNELS);
+                uart::uart_puts(") in task ");
+                uart::uart_print_usize(task as usize);
+            }
+        }
+        uart::uart_puts("\nSystem halted. Fix channel declarations and reboot.\n");
+        crate::halt()
+    }
+    #[cfg(any(test, kani))]
+    match prior {
+        Some(p) => panic!("CHANNEL CONFLICT: {} of channel {} claimed by task {} and task {}", end.name(), id, p, task),
+        None => panic!("CHANNEL ERROR: {} channel ID {} out of range in task {}", end.name(), id, task),
+    }
 }

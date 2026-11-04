@@ -10,6 +10,8 @@ pub static TASK_L: TaskConfig = TaskConfig {
 	exclusive_cap_mask: 0x0000_0001,
 	shared_cap_mask: 0x8000_0000,
 	required_cap_mask: 0,
+	sends_mask: 0,
+	receives_mask: 0,
 };
 
 pub static TASK_M: TaskConfig = TaskConfig {
@@ -20,6 +22,8 @@ pub static TASK_M: TaskConfig = TaskConfig {
 	exclusive_cap_mask: 0,
 	shared_cap_mask: 0x8000_0000,
 	required_cap_mask: 0,
+	sends_mask: 0,
+	receives_mask: 0,
 };
 
 pub static TASK_H: TaskConfig = TaskConfig {
@@ -30,4 +34,6 @@ pub static TASK_H: TaskConfig = TaskConfig {
 	exclusive_cap_mask: 0,
 	shared_cap_mask: 0x8000_0000,
 	required_cap_mask: 0x0000_0001,
+	sends_mask: 0,
+	receives_mask: 0,
 };

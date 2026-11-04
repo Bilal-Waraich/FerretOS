@@ -19,7 +19,7 @@ pub mod wrappers;
 #[cfg(test)]
 mod tests;
 
-pub use allocator::check_capability_conflicts;
+pub use allocator::{check_capability_conflicts, check_channel_conflicts};
 pub use types::{
     ConsoleCapability, GpioCapability, I2cCapability, SpiCapability, UartCapability,
     CONSOLE_CAP_BIT, CONSOLE_PERIPHERAL_ID,
