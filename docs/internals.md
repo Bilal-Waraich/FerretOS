@@ -252,3 +252,46 @@ _sidata)` (code and string constants). The task's declared `MemoryRegion` is
 not yet accepted, because demo regions are not backed by dedicated linker
 sections and can overlap kernel data (addressed with per-task PMP, #87). A
 `log` of a kernel address returns `EFAULT`; the boot test checks this.
+
+### Per-task PMP isolation — Issues #87, #89 ✅
+
+RAM is split in `kernel/memory.x`: kernel RAM (224 KB at `0x8008_0000`) and
+**TASKRAM** (32 KB at `0x800B_8000`). Each task's stack is placed in a
+`.task_ram.<slot>` section; the sections are 4 KB aligned and laid out in slot
+order, so task `n`'s 4 KB region is `0x800B_8000 + n·0x1000`. The OML region
+declarations match this, and boot halts with `MEMORY LAYOUT ERROR` if a task's
+stack is not inside its declared region. Moving the stacks out of `.data` cut
+the flash image from 25 KB to 14 KB.
+
+With `--features pmp`:
+
+| Entry | Covers | U-mode |
+|---|---|---|
+| 0 | flash, NAPOT 512 KB | R + X |
+| 1–2 | running task's region (NAPOT if power-of-two and aligned, else TOR) | R + W |
+
+Entries 1–2 are rewritten in `mark_running` on every dispatch. Kernel RAM,
+MMIO and other tasks' regions match no entry. `tests/integration/pmp_fault_test.sh`
+shows a U-mode store to a kernel variable trapping (`store access fault`,
+`mtval` = target address) with PMP, and succeeding without it.
+
+### Context-switch latency — Issues #41, #88 ✅
+
+Latency is measured in **retired instructions** (`minstret`), from trap
+handler entry through the new task's PMP setup, plus the 84 instructions of
+the assembly stub (45 entry, 39 exit) that the handler cannot observe. `mtime`
+is unsuitable: QEMU advances it with host wall-clock time.
+
+`scripts/switch_latency.sh` (QEMU `-icount shift=0`, 300 timer-driven switches
+per build; identical across runs):
+
+| Build | min | avg | max |
+|---|---|---|---|
+| default | 524 | 587 | 817 |
+| `pmp` | 568 | 631 | 861 |
+
+PMP costs **+44 instructions** per switch on average (two `pmpaddr` writes
+and three `pmpcfg0` read-modify-writes). Both builds stay within the
+1000-instruction budget. **Caveat:** QEMU is not cycle-accurate; on a simple
+in-order RV32 core one instruction is roughly one cycle, so these are a proxy
+for the Sprint 4 cycle budget, not a cycle measurement.

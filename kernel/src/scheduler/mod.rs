@@ -49,11 +49,19 @@ use queue::PriorityQueue;
 /// to the back of its priority level (round-robin tie-breaking).
 pub const TIME_QUANTUM_TICKS: u32 = 5;
 
-/// Maximum context switch latency in CLINT cycles before a warning is logged.
+/// Context-switch budget in retired instructions (Sprint 4: ≤ 1000 cycles).
 ///
-/// At 10 MHz that is 100 µs.  Exceeding this suggests the trap entry/exit path
-/// has grown beyond the Sprint 4 budget.
-pub const SWITCH_LATENCY_WARN_CYCLES: u32 = 1_000;
+/// Measured in instructions because QEMU is not cycle-accurate; on a simple
+/// in-order RV32 core one instruction is roughly one cycle, so this is a
+/// proxy for the cycle budget, not a cycle count.
+pub const SWITCH_LATENCY_BUDGET: u32 = 1_000;
+
+/// Instructions in the assembly trap stub that a switch always executes:
+/// 45 on entry (stack swap, 31 GPR + 5 CSR saves, call) and 39 on exit
+/// (31 GPR + 2 CSR restores, mscratch update, mret), counted from
+/// `context/trap.rs`.  The handler-side measurement cannot see them, so they
+/// are added to every sample.
+pub const TRAP_STUB_INSTRUCTIONS: u32 = 84;
 
 /// Number of context switches to accumulate before printing latency stats.
 const SWITCH_STATS_WINDOW: u32 = 100;
@@ -77,11 +85,11 @@ impl SwitchStats {
         SwitchStats { min: u32::MAX, max: 0, total: 0, count: 0 }
     }
 
-    /// Record one context-switch latency sample in CLINT cycles.
-    fn record(&mut self, cycles: u32) {
-        if cycles < self.min { self.min = cycles; }
-        if cycles > self.max { self.max = cycles; }
-        self.total += cycles as u64;
+    /// Record one context-switch latency sample in retired instructions.
+    fn record(&mut self, instructions: u32) {
+        if instructions < self.min { self.min = instructions; }
+        if instructions > self.max { self.max = instructions; }
+        self.total += instructions as u64;
         self.count += 1;
 
         if self.count >= SWITCH_STATS_WINDOW {
@@ -95,8 +103,11 @@ impl SwitchStats {
                 uart::uart_print_usize(self.max as usize);
                 uart::uart_puts(" avg=");
                 uart::uart_print_usize(avg as usize);
-                uart::uart_puts(" cycles");
-                if self.max > SWITCH_LATENCY_WARN_CYCLES {
+                uart::uart_puts(" instructions");
+                if cfg!(feature = "pmp") {
+                    uart::uart_puts(" [pmp]");
+                }
+                if self.max > SWITCH_LATENCY_BUDGET {
                     uart::uart_puts(" [WARN: exceeded budget]");
                 }
                 uart::uart_puts("\n");
@@ -396,7 +407,7 @@ pub fn should_preempt(cur_eff: u8, next_eff: Option<u8>, ticks_since_switch: u32
 ///
 /// Returns the frame to resume — `frame` itself, or the next task's frame.
 pub fn on_timer_interrupt(frame: *mut TrapFrame) -> *mut TrapFrame {
-    let isr_entry = crate::clint::get_mtime() as u32;
+    let isr_entry = crate::clint::instret();
     let now = crate::clint::timer_isr();
     save_current(frame);
     check_stack_canaries();
@@ -411,12 +422,14 @@ pub fn on_timer_interrupt(frame: *mut TrapFrame) -> *mut TrapFrame {
 /// Preemption check for one timer tick.
 ///
 /// Returns `Some(new_task_idx)` when the scheduler switched away from the
-/// current task, `None` when the current task continues.  Records the
-/// decision latency (ISR entry → switch decided) for #41 statistics.
+/// current task, `None` when the current task continues.  For #41/#88
+/// statistics it records the switch path length: instructions retired from
+/// handler entry through the new task's PMP setup, plus the fixed trap stub
+/// cost ([`TRAP_STUB_INSTRUCTIONS`]).
 ///
 /// # Arguments
 ///
-/// * `isr_entry` — low 32 bits of `mtime` sampled at ISR entry.
+/// * `isr_entry` — `minstret` sampled at handler entry.
 pub fn tick(isr_entry: u32) -> Option<u8> {
     // SAFETY: trap path, interrupts disabled, single hart; scheduler statics
     // are accessed only through raw pointers.
@@ -441,7 +454,7 @@ pub fn tick(isr_entry: u32) -> Option<u8> {
             return None;
         }
 
-        let elapsed = (crate::clint::get_mtime() as u32).wrapping_sub(isr_entry);
+        let elapsed = crate::clint::instret().wrapping_sub(isr_entry) + TRAP_STUB_INSTRUCTIONS;
         (*core::ptr::addr_of_mut!(SWITCH_STATS)).record(elapsed);
         Some(next_idx)
     }
