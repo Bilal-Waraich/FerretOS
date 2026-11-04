@@ -238,12 +238,16 @@ Wrappers live in `kernel/src/sys.rs`; the dispatcher in `kernel/src/syscall.rs`.
 | 1 | `sleep` | `a0` = ticks (min 1) | 0 | Caller is `Blocked` until the tick arrives. |
 | 2 | `log` | `a0` = address, `a1` = length | bytes written | Requires the console capability (`shared_cap_mask` bit 31). Length capped at 256. |
 | 3 | `now` | — | ticks since boot | 1 tick = 1 ms. |
+| 4 | `send` | `a0` = channel, `a1` = address, `a2` = length (≤ 16), `a3` = flags | 0 | Requires the sender endpoint (`sends_mask`). Blocks while full unless `a3 = FLAG_NONBLOCK`. |
+| 5 | `receive` | `a0` = channel, `a1` = buffer, `a2` = buffer size, `a3` = flags | message length | Requires the receiver endpoint (`receives_mask`). Blocks while empty unless `FLAG_NONBLOCK`. Copy truncated to the buffer. |
 
 | Error | Value | Meaning |
 |---|---|---|
 | `ENOSYS` | `usize::MAX` | Unknown syscall number. |
 | `EPERM` | `usize::MAX - 1` | Caller lacks the required capability. |
-| `EFAULT` | `usize::MAX - 2` | Buffer not readable by the caller. |
+| `EFAULT` | `usize::MAX - 2` | Buffer not accessible by the caller. |
+| `EAGAIN` | `usize::MAX - 3` | Would block (non-blocking variant). |
+| `EINVAL` | `usize::MAX - 4` | Argument out of range (no such channel, message > 16 bytes). |
 
 **Validation.** The kernel never dereferences a task pointer until the whole
 buffer `[addr, addr + len)` (overflow-checked) lies inside memory the caller
@@ -295,3 +299,31 @@ and three `pmpcfg0` read-modify-writes). Both builds stay within the
 1000-instruction budget. **Caveat:** QEMU is not cycle-accurate; on a simple
 in-order RV32 core one instruction is roughly one cycle, so these are a proxy
 for the Sprint 4 cycle budget, not a cycle measurement.
+
+### Blocking channels — Issues #76, #77 ✅
+
+Tasks in U-mode share no memory, so channels live in the kernel
+(`ipc/kernel.rs`): `MAX_CHANNELS` (8) slots, each a `Channel<Message, 8>` ring
+buffer of messages up to 16 bytes. `send` copies a message out of the
+caller's memory, `receive` copies one into the caller's buffer, after the
+same buffer validation as `log` (`receive` additionally rejects flash: the
+buffer must be writable by the task).
+
+**Blocking is restartable.** When a channel is full (send) or empty
+(receive), the kernel rewinds `mepc` to the `ecall`, marks the task
+`Blocked(Send(ch))` / `Blocked(Receive(ch))`, and dispatches the next task.
+The counterpart operation wakes the (single, by SPSC) waiting task; if it now
+outranks the caller, the kernel switches to it immediately rather than at the
+next tick. On resume the task re-executes the `ecall`, which succeeds.
+
+**Limitation — channel waits are not in the CCG.** Following the design in
+`FerretEvolution.md`, only capability contention creates CCG edges. A task
+blocked on a channel waits for its peer, but neither inherits the other's
+priority. If a high-priority task blocks on a full channel whose consumer has
+lower priority, a task of intermediate priority can delay the consumer and
+therefore the high-priority task: priority inversion through IPC is possible.
+Designs avoid it by flowing data from higher to lower priority with no task
+between the stages (as the sensor pipeline does), by sizing channels so the
+producer never blocks, or by using `try_send`. Modelling channel waits as CCG
+edges (sender → receiver for empty, receiver → sender for full) would close
+the gap at the cost of raising priorities along every bidirectional channel.

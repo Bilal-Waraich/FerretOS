@@ -24,6 +24,19 @@ pub enum TaskState {
     Suspended,
 }
 
+/// Why a `Blocked` task is waiting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BlockReason {
+    /// Not blocked.
+    None,
+    /// Sleeping until tick `wake_at`.
+    Sleep,
+    /// Waiting for space in channel `.0` (blocking send on a full channel).
+    Send(u8),
+    /// Waiting for a message on channel `.0` (blocking receive on an empty one).
+    Receive(u8),
+}
+
 /// Privilege mode a task executes in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskMode {
@@ -124,6 +137,9 @@ pub struct TaskDescriptor {
 
     /// Channels this task receives on: bit `i` = holds `ReceiverCapability<i>`.
     pub receives_mask: u32,
+
+    /// What the task is waiting for while `state == Blocked`.
+    pub blocked_on: BlockReason,
 }
 
 impl TaskDescriptor {
@@ -158,6 +174,7 @@ impl TaskDescriptor {
             mode: TaskMode::User,
             sends_mask: 0,
             receives_mask: 0,
+            blocked_on: BlockReason::None,
         }
     }
 
@@ -195,6 +212,7 @@ impl TaskDescriptor {
             mode: TaskMode::User,
             sends_mask: 0,
             receives_mask: 0,
+            blocked_on: BlockReason::None,
         }
     }
 
@@ -329,4 +347,15 @@ pub fn task_count() -> usize {
 /// The caller marks its own `unsafe` block and documents the invariant there.
 pub fn task_registry_ptr() -> *mut [Option<TaskDescriptor>; MAX_TASKS] {
     core::ptr::addr_of_mut!(TASK_REGISTRY)
+}
+
+/// Clear the task registry (host unit tests only; see `scheduler::TEST_LOCK`).
+#[cfg(test)]
+pub(crate) fn reset_registry_for_test() {
+    // SAFETY: callers hold the scheduler test lock, so no other test thread
+    // touches the registry concurrently.
+    unsafe {
+        *core::ptr::addr_of_mut!(TASK_REGISTRY) = [const { None }; MAX_TASKS];
+        *core::ptr::addr_of_mut!(TASK_COUNT) = 0;
+    }
 }
