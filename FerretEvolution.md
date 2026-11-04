@@ -1,6 +1,6 @@
 # Evolution of Ferret OS
 
-> From software-guaranteed prototype to formally verified, hardware-enforced physical deployment.
+> From software-guaranteed prototype to a formally verified, hardware-isolated, portable kernel — verified in emulation.
 
 ---
 
@@ -22,10 +22,11 @@
    - [Sprint 10 — Sensor Fusion Demo (Weeks 21–22)](#sprint-10--sensor-fusion-demo-weeks-2122)
    - [Sprint 11 — Algorithmic Proofs (Weeks 23–24)](#sprint-11--algorithmic-proofs-weeks-2324)
 5. [Phase II Issues Breakdown](#phase-ii-issues-breakdown)
-6. [Phase III: Physical Deployment and Execution Proofs](#phase-iii-physical-deployment-and-execution-proofs)
+6. [Phase III: Portability and Timing Analysis (Emulated)](#phase-iii-portability-and-timing-analysis-emulated)
    - [Phase III Thesis](#phase-iii-thesis)
-   - [Sprint 12 — Silicon Reality (Weeks 25–26)](#sprint-12--silicon-reality-weeks-2526)
-   - [Sprint 13 — Mathematical Certainty: Automated WCET Analysis (Weeks 27–28)](#sprint-13--mathematical-certainty-automated-wcet-analysis-weeks-2728)
+   - [Scope Revision: No Physical Hardware](#scope-revision-no-physical-hardware)
+   - [Sprint 12 — Portability, Emulated (Weeks 25–26)](#sprint-12--portability-emulated-weeks-2526)
+   - [Sprint 13 — Timing Analysis, Emulated (Weeks 27–28)](#sprint-13--timing-analysis-emulated-weeks-2728)
    - [Phase III Issues Breakdown](#phase-iii-issues-breakdown)
 
 ---
@@ -254,7 +255,7 @@ The Lean 4 proof files live in `proofs/` at the repo root and are cross-referenc
 
 **Technical notes:**
 - The demo output should be human-readable: timestamps in milliseconds derived from CLINT `mtime`, task name prefix on each UART line, deadline miss counter (should remain zero throughout the recording).
-- The threat model is a living document — flag it explicitly as Phase II scope in a header comment so Phase III additions (PMP hardening, physical silicon) have a natural extension point.
+- The threat model is a living document — flag it explicitly as Phase II scope in a header comment so Phase III additions (RV32IMC portability, timing analysis) have a natural extension point.
 
 ---
 
@@ -309,52 +310,68 @@ The Lean 4 proof files live in `proofs/` at the repo root and are cross-referenc
 
 ---
 
-## Phase III: Physical Deployment and Execution Proofs
+## Phase III: Portability and Timing Analysis (Emulated)
 
 ### Phase III Thesis
 
-Phase II delivers a formally argued, communicating, hardware-isolated Ferret OS — but still running in QEMU emulation. Phase III addresses the two remaining gaps between a research prototype and a genuinely deployable system: running on physical silicon, and providing mathematical proof of timing correctness. These are deliberately deferred to Phase III because they carry substantial engineering risk that would destabilise a Phase II timeline if included prematurely.
+Phase II delivers a formally argued, communicating, hardware-isolated Ferret OS running in QEMU. Phase III addresses the two remaining gaps between a research prototype and a deployable system: portability beyond the one ISA variant Ferret was developed on, and evidence that every task meets its declared deadline.
 
 ---
 
-### Sprint 12 — Silicon Reality (Weeks 25–26)
+### Scope Revision: No Physical Hardware
 
-**Goal:** Ferret OS boots on a physical ESP32-C3 development board. The sensor fusion pipeline demo from Phase II runs on real hardware with physical UART output.
+The original Phase III plan targeted a physical ESP32-C3 board. No RISC-V hardware is available for this project, so Phase III is rescoped so that **every deliverable is built and verified in emulation and CI**. Nothing in this phase may be claimed as validated on silicon.
 
-**ISA compatibility note:** The ESP32-C3 implements RV32IMC — it lacks the Atomic (`A`) extension present in Ferret's QEMU target (`riscv32imac`). This is a meaningful architectural difference. Every use of `AtomicUsize` in the IPC layer (channel head/tail indices) must be audited and replaced with critical-section-based equivalents using the `critical-section` crate. This audit should be completed before any physical board work begins.
+**Dropped, and why:**
 
-**Deliverables:**
-- ISA audit: identify all uses of atomic operations in the kernel and IPC layer; document replacement strategy.
-- Custom linker script `esp32c3.ld` mapping to the ESP32-C3's physical SRAM and Flash layout.
-- Physical clock tree initialisation: PLL configuration, watchdog disable, system clock setup via register writes.
-- Hardware-specific UART driver for the ESP32-C3 peripheral memory map.
-- `probe-rs` integration for flashing `ferret.elf` over JTAG/USB.
-- Sensor fusion pipeline demo running on physical hardware with LED indicators for task preemption events.
+| Original item | Reason dropped |
+|---|---|
+| `probe-rs` JTAG/USB flashing | Requires a physical board and debug probe. |
+| Physical LED demo (one GPIO per task, logic-analyser trace) | Requires a physical board. The UART trace from Sprint 13 is the emulated substitute. |
+| Empirical WCET baselines on hardware | Requires a physical board. Baselines are collected in QEMU only. |
+| Physical clock tree / PLL initialisation | Cannot be meaningfully validated without silicon; Espressif QEMU does not model the PLL. |
 
-**Technical notes:**
-- ESP32-C3 SRAM: 400KB total (split between instruction and data); Flash: 4MB. Ferret's 256KB RAM constraint is met comfortably, but the memory map layout is non-standard — linker script work is non-trivial.
-- The ESP-IDF ROM bootloader expects a specific partition table in Flash. The simplest approach is to produce a raw binary with no partition table and flash it directly to address `0x0` using `probe-rs`, bypassing the ESP-IDF boot sequence entirely.
-- Physical LED demo: assign one GPIO per task; a GPIO pulse on each context switch provides a logic-analyser-visible record of scheduler behaviour. This is more compelling on video than raw UART numbers.
+**Limitation — emulated timing.** QEMU is not cycle-accurate. All timing figures in Phase III are collected with QEMU's `-icount` mode, which makes them deterministic and reproducible but turns them into *instruction-count proxies*, not real-time measurements. They show that the scheduling and deadline-checking machinery works and give relative costs; they are not a real-time guarantee for any physical part. `docs/wcet_analysis.md` repeats this caveat next to every number.
 
 ---
 
-### Sprint 13 — Mathematical Certainty: Automated WCET Analysis (Weeks 27–28)
+### Sprint 12 — Portability, Emulated (Weeks 25–26)
 
-**Goal:** Each task's worst-case execution time is computed statically and compared against its OML-declared deadline. The CI pipeline fails if any task violates its deadline.
+**Goal:** Ferret builds and boots on RISC-V cores without the Atomic (`A`) extension, and has an ESP32-C3 board port validated in Espressif's QEMU fork.
 
-**Tooling note:** OTAWA's RISC-V backend is academic-quality and can be difficult to configure reliably against a `no_std` binary with custom linker sections. Sprint 13 should begin with a lighter-weight approach — manual cycle-counting via CLINT timestamps logged to UART — to establish empirical baselines and validate that declared deadlines are realistic before investing in static analysis tooling. OTAWA (or a comparable tool such as `platin` for LLVM-based RISC-V analysis) is introduced only once the empirical groundwork is in place. The CI-fails-on-WCET-violation story is compelling, but only if the tooling produces reliable results.
+**ISA compatibility note:** The ESP32-C3 implements RV32IMC — it lacks the `A` extension present in Ferret's QEMU target (`riscv32imac`). Every atomic operation in the kernel and IPC layer must be audited and replaced with critical-section equivalents on targets without `A`.
 
-**Deliverables:**
-- CLINT-based cycle counter instrumentation: each task logs entry/exit timestamps to a static circular buffer; a diagnostic task drains the buffer to UART after each scheduling epoch.
-- Empirical WCET baselines established for all three pipeline tasks across 1000 scheduling cycles in QEMU and on physical hardware.
-- OTAWA (or `platin`) containerised in a Docker image and integrated into CI as an optional `wcet_check.yml` workflow.
-- Analysis script: extracts deadline values from `.oml` files and compares against static analysis output; fails the build on violations.
-- `docs/wcet_analysis.md`: methodology, tool configuration, known limitations, and comparison of empirical vs. static bounds.
+**Deliverables (each with the check that verifies it):**
+
+| Deliverable | Verified by |
+|---|---|
+| Atomic audit; channel indices behind an abstraction (atomics on IMAC, interrupt-masking critical sections on IMC) | `objdump` check in CI: no `lr`/`sc`/`amo*` instructions in the IMC binary; Kani harnesses cover both paths |
+| IMC kernel boots and passes the full integration test | CI matrix leg: QEMU `virt` with `-cpu rv32,a=false` |
+| *Stretch:* `board-esp32c3` feature — `esp32c3.ld`, ESP32-C3 UART driver, watchdog disable, system timer in place of CLINT | Boots in Espressif QEMU (`-M esp32c3`); if that emulator cannot run in CI, the feature builds in CI and the emulator run is a documented manual step |
 
 **Technical notes:**
-- Static WCET analysis requires loop bound annotations on any loop whose iteration count is not statically obvious. Ferret's `no_std` design — no dynamic allocation, bounded queues, fixed task set — makes most loop bounds trivially static. Document the annotations required.
-- The gap between empirical worst case and static WCET bound is expected to be significant (static tools are conservative). Document this gap explicitly; it is not a failure of the analysis but a feature of its soundness guarantee.
-- If OTAWA does not produce reliable results for the target binary format, `cargo-call-stack` provides a lighter-weight alternative that proves the absence of dynamic dispatch and unbounded recursion — a weaker but still meaningful property.
+- ESP32-C3 SRAM: 400 KB total; Flash: 4 MB. Ferret's 256 KB RAM constraint is met comfortably, but the memory map is non-standard.
+- The port is documented as **emulator-validated only, untested on silicon**.
+
+---
+
+### Sprint 13 — Timing Analysis, Emulated (Weeks 27–28)
+
+**Goal:** Each task's observed execution time is measured deterministically and compared against its OML-declared deadline. CI fails if any task violates its deadline.
+
+**Deliverables (each with the check that verifies it):**
+
+| Deliverable | Verified by |
+|---|---|
+| Per-task execution-time trace into a static ring buffer, drained to UART (`feature = "trace"`) | Trace parser in CI; default build size unchanged |
+| Empirical baselines for the pipeline tasks over 1000 scheduling cycles | `scripts/timing_baseline.sh` under QEMU `-icount`; two runs must be identical |
+| Deadline check: OML deadlines vs. measured maxima plus a documented margin | `wcet_check.yml`; demonstrably fails when a deadline is lowered below the measured maximum |
+| *Stretch:* static analysis — no recursion, no unexpected indirect calls, worst-case stack depth per task vs. `Stack<N>` | CI check; OTAWA/platin feasibility recorded (adopted, or why not) |
+| `docs/wcet_analysis.md` — methodology, results, limitations | Every number reproducible by a script in the repo |
+
+**Technical notes:**
+- Measurement-based timing analysis cannot prove an upper bound; it shows the observed maximum under the exercised inputs. The static stretch goal is the only route to a sound bound and is attempted only if the tooling is reliable on this binary.
+- Validating any of these figures on physical silicon is future work outside this project's scope.
 
 ---
 
@@ -362,16 +379,12 @@ Phase II delivers a formally argued, communicating, hardware-isolated Ferret OS 
 
 | Title | Label | Sprint |
 |---|---|---|
-| Audit all atomic operations for RV32IMC compatibility | `kernel`, `hardware` | Sprint 12 |
-| Replace atomics with critical-section equivalents where required | `kernel`, `hardware` | Sprint 12 |
-| Write ESP32-C3 custom linker script | `hardware` | Sprint 12 |
-| Implement ESP32-C3 physical clock and watchdog initialisation | `hardware` | Sprint 12 |
-| Rewrite UART driver for ESP32-C3 memory map | `hardware` | Sprint 12 |
-| Integrate `probe-rs` for JTAG/USB flashing | `tooling`, `hardware` | Sprint 12 |
-| Demonstrate sensor fusion demo on physical hardware with LEDs | `demo`, `hardware` | Sprint 12 |
-| Instrument tasks with CLINT cycle counters | `perf`, `verification` | Sprint 13 |
-| Establish empirical WCET baselines in QEMU and on hardware | `perf`, `verification` | Sprint 13 |
-| Containerise OTAWA (or `platin`) for RISC-V static analysis | `ci`, `verification` | Sprint 13 |
-| Integrate WCET static analysis into `wcet_check.yml` CI workflow | `ci`, `verification` | Sprint 13 |
-| Write analysis script: OML deadlines vs. static WCET output | `ci`, `oml` | Sprint 13 |
-| Write `docs/wcet_analysis.md` | `docs`, `verification` | Sprint 13 |
+| Revise Phase III scope for emulation-only development | `docs` | Sprint 12 |
+| Replace atomics with critical sections for RV32IMC targets | `ipc`, `portability` | Sprint 12 |
+| Build and boot an RV32IMC kernel in QEMU without the A extension | `tooling`, `portability` | Sprint 12 |
+| Add ESP32-C3 board support validated in Espressif QEMU (stretch) | `kernel`, `portability` | Sprint 12 |
+| Instrument per-task execution time into a static trace buffer | `scheduler`, `perf` | Sprint 13 |
+| Establish empirical execution-time baselines in QEMU | `test`, `perf` | Sprint 13 |
+| Fail the build when a task exceeds its OML-declared deadline | `tooling`, `oml`, `perf` | Sprint 13 |
+| Add static call-graph and stack-bound analysis (stretch) | `tooling`, `verification` | Sprint 13 |
+| Write `docs/wcet_analysis.md` | `docs`, `perf` | Sprint 13 |
