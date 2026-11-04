@@ -169,3 +169,35 @@ counter: 200000
 Interleaved output confirms: `__trap_entry` saves state without corrupting
 the counter, UART from the ISR does not corrupt task registers, and `mret`
 resumes the loop at the correct instruction.
+
+---
+
+## Phase II
+
+### Runtime CCG removed from the kernel binary — Issue #84 ✅
+
+Since #42 the boot path only copies `MAX_INHERITED_PRIORITIES` (computed by
+`kernel/build/ccg_gen.rs`) into the task registry. The in-kernel reference
+implementation (`scheduler/ccg.rs`, `scheduler/mip.rs`) is now compiled only
+under `cfg(test)` and `cfg(kani)`, where it cross-checks the build-time
+generator and backs the Kani harnesses.
+
+**ROM delta: 0 bytes.** Measured with `scripts/size_report.sh` on the release
+build before and after the change:
+
+| Section | Before | After |
+|---|---|---|
+| `.text` | 9434 | 9434 |
+| `.rodata` | 1920 | 1920 |
+
+The release profile already uses fat LTO, which discarded the never-called
+graph code; gating the modules makes its absence a property of the source
+rather than of the optimiser. `size_report.sh` enforces it: the build fails if
+`llvm-nm` finds `CapabilityContentionGraph`, `compute_mip_values` or
+`compute_and_store_mip` symbols in the kernel ELF. (The check matches symbol
+names, so it would miss code that was fully inlined into a caller; with the
+modules compiled out of non-test builds that cannot happen.)
+
+`size_report.sh` also now counts `.data` toward the flash budget — its initial
+values are stored in flash and copied to RAM at reset — and looks for
+`llvm-size`/`llvm-nm` in the Rust sysroot.
