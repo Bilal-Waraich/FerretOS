@@ -27,3 +27,15 @@ const _: () = assert!(
 /// Bounds the channel-endpoint conflict check in the capability allocator and
 /// any static channel registry.  Channel IDs run `0..MAX_CHANNELS`.
 pub const MAX_CHANNELS: usize = 8;
+
+/// Start of the flash image (code + read-only data) — `kernel/memory.x`.
+pub const FLASH_ORIGIN: usize = 0x8000_0000;
+
+/// Size of the flash region in bytes (512 KB budget).
+pub const FLASH_SIZE: usize = 512 * 1024;
+
+/// Start of the task RAM area holding every task's memory region.
+pub const TASK_RAM_ORIGIN: usize = 0x800B_8000;
+
+/// Size of the task RAM area in bytes.
+pub const TASK_RAM_SIZE: usize = 32 * 1024;

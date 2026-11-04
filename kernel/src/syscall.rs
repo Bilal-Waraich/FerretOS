@@ -21,8 +21,8 @@
 //! Tasks run in U-mode and are untrusted.  The kernel runs in M-mode, where
 //! PMP does not apply, so it must never dereference a task-supplied pointer
 //! without first checking that the whole buffer lies in memory the task may
-//! read itself: its own stack, or the shared read-only flash image (code
-//! and string constants).  See [`buffer_readable`].
+//! read itself: its own memory region and stack, or the shared read-only
+//! flash image (code and string constants).  See [`buffer_readable`].
 
 use crate::capability::CONSOLE_CAP_BIT;
 use crate::context::{TrapFrame, REG_A0, REG_A1, REG_A7};
@@ -136,10 +136,14 @@ fn sys_log(ptr: usize, len: usize) -> usize {
     if !may_log(&task) {
         return EPERM;
     }
-    // The task's declared `MemoryRegion` is not accepted yet: until task
-    // regions are backed by dedicated linker sections (#87) they may overlap
-    // kernel data.
-    let ranges = [(task.stack_base, task.stack_base + task.stack_size), flash_image()];
+    // The task's own memory region (which contains its stack; checked at
+    // boot) and the shared read-only flash image.  Regions are linker-backed
+    // sections in TASKRAM, disjoint from kernel RAM (#87).
+    let ranges = [
+        (task.memory_start, task.memory_end),
+        (task.stack_base, task.stack_base + task.stack_size),
+        flash_image(),
+    ];
     if !buffer_readable(ptr, len, &ranges) {
         return EFAULT;
     }

@@ -19,20 +19,54 @@ const IDLE_PRIORITY: u8 = 0;
 // Compile-time overlap check for the three CA-PIP demo task memory regions.
 // ---------------------------------------------------------------------------
 const _: () = memory::assert_no_overlap::<
-    0x8008_1000, 0x8008_2000,   // task L: 4 KB
-    0x8008_2000, 0x8008_3000,   // task M: 4 KB
+    0x800B_8000, 0x800B_9000,   // task L: 4 KB
+    0x800B_9000, 0x800B_A000,   // task M: 4 KB
 >();
 const _: () = memory::assert_no_overlap::<
-    0x8008_2000, 0x8008_3000,   // task M: 4 KB
-    0x8008_3000, 0x8008_4000,   // task H: 4 KB
+    0x800B_9000, 0x800B_A000,   // task M: 4 KB
+    0x800B_A000, 0x800B_B000,   // task H: 4 KB
 >();
 
-// Statically allocated stacks.  Each Stack<N> carries a canary at its lowest
-// address that the scheduler checks on every tick.
+// Task stacks.  Each fills its task's 4 KB memory region in TASKRAM: the
+// linker places `.task_ram.<slot>` sections in slot order (kernel/memory.x),
+// and `check_region_placement` verifies at boot that this matches the OML
+// declarations.  The sections are NOLOAD, so canaries are written at boot.
+#[link_section = ".task_ram.0"]
 static mut STACK_TASK_L: memory::Stack<4096> = memory::Stack::new();
+#[link_section = ".task_ram.1"]
 static mut STACK_TASK_M: memory::Stack<4096> = memory::Stack::new();
+#[link_section = ".task_ram.2"]
 static mut STACK_TASK_H: memory::Stack<4096> = memory::Stack::new();
+// The idle task runs in M-mode and is not PMP-constrained; its stack stays
+// in kernel RAM.
 static mut STACK_IDLE: memory::Stack<1024> = memory::Stack::new();
+
+/// Halt unless every task's stack lies inside its declared memory region.
+///
+/// The OML region addresses and the linker's placement of `.task_ram.*` are
+/// two descriptions of the same layout; PMP isolation is only meaningful if
+/// they agree.  Boot-time fatal on mismatch (CLAUDE.md §6.5).
+fn check_region_placement() {
+    for task in memory::registry().iter().flatten() {
+        if task.mode != TaskMode::User {
+            continue;
+        }
+        let inside = task.stack_base >= task.memory_start
+            && task.stack_base + task.stack_size <= task.memory_end;
+        if !inside {
+            uart::uart_puts("MEMORY LAYOUT ERROR: task ");
+            uart::uart_print_usize(task.id as usize);
+            uart::uart_puts(" stack at ");
+            uart::uart_print_hex(task.stack_base);
+            uart::uart_puts(" is outside its OML region [");
+            uart::uart_print_hex(task.memory_start);
+            uart::uart_puts(", ");
+            uart::uart_print_hex(task.memory_end);
+            uart::uart_puts(")\nSystem halted. Fix tasks/demo_tasks.oml or kernel/memory.x.\n");
+            ferret::halt();
+        }
+    }
+}
 
 /// Boot entry point — called by riscv-rt after BSS zero-init and `.data` copy.
 ///
@@ -76,6 +110,15 @@ fn kernel_main() -> ! {
             .with_mode(TaskMode::Machine),
     );
 
+    // SAFETY: boot path, no task running; each address is the base of a
+    // Stack<N> in a NOLOAD section that no one has used yet.
+    unsafe {
+        memory::stack::write_canary(stack_l);
+        memory::stack::write_canary(stack_m);
+        memory::stack::write_canary(stack_h);
+    }
+    check_region_placement();
+
     uart::uart_puts("Tasks registered: ");
     uart::uart_print_usize(memory::task_count());
     uart::uart_puts("\n");
@@ -86,10 +129,10 @@ fn kernel_main() -> ! {
     uart::uart_puts("Capability check passed.\n");
 
     // --- PMP configuration ------------------------------------------------
-    // Per-task regions (feature = "pmp"), then the lowest-priority default
-    // grant that lets U-mode tasks execute at all.
+    // feature = "pmp": flash R+X, and the running task's region R+W
+    // (reprogrammed on every switch).  Otherwise a permissive grant so U-mode
+    // can execute at all.
     memory::configure_pmp();
-    memory::grant_user_default();
 
     // --- Scheduler init -------------------------------------------------------
     // Write precomputed MIP constants, populate the ready queue, and build

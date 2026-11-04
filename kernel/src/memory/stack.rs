@@ -109,6 +109,20 @@ impl<const N: usize> Stack<N> {
     }
 }
 
+/// Write the canary at the bottom of the stack starting at `stack_base`.
+///
+/// Stacks placed in a `NOLOAD` section (the task RAM regions) do not keep the
+/// canary written by [`Stack::new`], because their initial contents are not
+/// loaded; the boot code calls this for each of them before any task runs.
+///
+/// # Safety
+///
+/// `stack_base` must be the address of a `Stack<N>` that no task is using.
+pub unsafe fn write_canary(stack_base: usize) {
+    // SAFETY: guaranteed by the caller; volatile so the store is not elided.
+    unsafe { core::ptr::write_volatile(stack_base as *mut u32, STACK_CANARY) };
+}
+
 /// Return `true` if the canary at the bottom of the stack starting at
 /// `stack_base` is intact.
 ///

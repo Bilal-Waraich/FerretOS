@@ -298,6 +298,7 @@ fn mark_running(idx: u8) {
         let t = task_ptr(idx);
         if !t.is_null() {
             (*t).state = TaskState::Running;
+            crate::memory::activate_task_region(&*t);
         }
     }
 }
