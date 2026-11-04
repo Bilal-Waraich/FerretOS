@@ -46,9 +46,19 @@ SIZE_CMD=""
 
 # llvm-size may be installed as `rust-size` (via cargo-binutils) or as a
 # versioned binary like `llvm-size-17`.  Try common names in order.
-for candidate in rust-size llvm-size llvm-size-17 llvm-size-16 size; do
+# The llvm-tools rustup component installs llvm-size/llvm-nm inside the
+# toolchain sysroot without putting them on PATH; look there too.
+SYSROOT_BIN="$(ls -d "$(rustc --print sysroot 2>/dev/null)"/lib/rustlib/*/bin 2>/dev/null | head -1 || true)"
+for candidate in rust-size llvm-size llvm-size-17 llvm-size-16 "$SYSROOT_BIN/llvm-size" size; do
     if command -v "$candidate" &>/dev/null; then
         SIZE_CMD="$candidate"
+        break
+    fi
+done
+NM_CMD=""
+for candidate in rust-nm llvm-nm "$SYSROOT_BIN/llvm-nm"; do
+    if command -v "$candidate" &>/dev/null; then
+        NM_CMD="$candidate"
         break
     fi
 done
@@ -89,14 +99,24 @@ BSS_SIZE=$(get_section_size ".bss")
 # If sysv mode didn't work (some older size tools default to BSD mode),
 # try to parse the simpler BSD output: text   data    bss     dec     hex
 if [[ "$TEXT_SIZE" -eq 0 && "$RODATA_SIZE" -eq 0 && "$DATA_SIZE" -eq 0 && "$BSS_SIZE" -eq 0 ]]; then
-    BSD_LINE=$(echo "$RAW_OUTPUT" | grep -v "^text" | grep -v "^$" | head -1)
+    BSD_LINE=$(echo "$RAW_OUTPUT" | grep -v "^text" | grep -v "^$" | head -1 || true)
     TEXT_SIZE=$(echo "$BSD_LINE" | awk '{print $1}')
     DATA_SIZE=$(echo "$BSD_LINE" | awk '{print $2}')
     BSS_SIZE=$(echo "$BSD_LINE" | awk '{print $3}')
     RODATA_SIZE=0  # BSD format folds rodata into text
 fi
 
-FLASH_USED=$(( TEXT_SIZE + RODATA_SIZE ))
+for v in "$TEXT_SIZE" "$RODATA_SIZE" "$DATA_SIZE" "$BSS_SIZE"; do
+    if ! [[ "$v" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: could not parse section sizes from '$SIZE_CMD' output." >&2
+        echo "       Put rustc on PATH so the toolchain's llvm-size is found." >&2
+        exit 1
+    fi
+done
+
+# .data occupies RAM at run time *and* flash at rest: its initial values are
+# stored in flash and copied to RAM by the reset code.
+FLASH_USED=$(( TEXT_SIZE + RODATA_SIZE + DATA_SIZE ))
 RAM_USED=$(( DATA_SIZE + BSS_SIZE ))
 
 # ---------------------------------------------------------------------------
@@ -169,6 +189,19 @@ if [[ "$RAM_USED" -gt "$RAM_BUDGET" ]]; then
     FAIL=true
 else
     echo "  RAM:   OK ($(( RAM_BUDGET - RAM_USED )) bytes remaining)"
+fi
+
+
+# The CCG and MIP are computed at build time (#42); the kernel binary must not
+# contain the in-kernel reference implementation (#84).
+if [[ -n "$NM_CMD" ]]; then
+    CCG_SYMS=$("$NM_CMD" -C "$KERNEL_ELF" 2>/dev/null | grep -cE "CapabilityContentionGraph|compute_mip_values|compute_and_store_mip" || true)
+    if [[ "$CCG_SYMS" -gt 0 ]]; then
+        echo "FAIL: $CCG_SYMS runtime CCG/MIP symbol(s) found in the kernel binary" >&2
+        FAIL=true
+    else
+        echo "  CCG:   OK (no runtime graph code in binary)"
+    fi
 fi
 
 echo "=========================================="

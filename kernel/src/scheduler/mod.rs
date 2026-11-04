@@ -17,8 +17,10 @@
 //!    when the running task's quantum has expired and an equal-priority task is
 //!    waiting (round-robin; the queue is FIFO among equal priorities).
 //!
-//! `ccg.rs` and `mip.rs` are retained for their unit-test coverage but are not
-//! called at boot.
+//! `ccg.rs` and `mip.rs` hold the reference (in-kernel) CCG and MIP
+//! algorithms.  They are compiled only for host unit tests and Kani, where
+//! they cross-check the build-time generator (`kernel/build/ccg_gen.rs`); the
+//! kernel binary contains no graph code.
 //!
 //! # CA-PIP guarantee
 //!
@@ -26,7 +28,9 @@
 //! priority inversion is structurally impossible: a holder's effective priority
 //! is always ≥ every waiter's priority, so it can never be preempted by a waiter.
 
+#[cfg(any(test, kani))]
 pub mod ccg;
+#[cfg(any(test, kani))]
 pub mod mip;
 pub mod queue;
 
@@ -38,13 +42,6 @@ use crate::context::TrapFrame;
 use crate::generated::ccg_constants::MAX_INHERITED_PRIORITIES;
 use crate::memory::task::{task_count, task_registry_ptr, TaskDescriptor, TaskState};
 use queue::PriorityQueue;
-
-// ccg and mip modules are retained for their test coverage; they are no
-// longer called at boot.
-#[allow(unused_imports)]
-use ccg::CapabilityContentionGraph;
-#[allow(unused_imports)]
-use mip::compute_and_store_mip;
 
 /// Time quantum in timer ticks (1 tick = 1 ms by default).
 ///
