@@ -19,3 +19,26 @@ pub mod kani_proofs;
 pub mod memory;
 pub mod scheduler;
 pub mod uart;
+pub mod sys;
+pub mod syscall;
+
+/// Halt the hart permanently after a fatal error.
+///
+/// Used by boot-time and runtime fatal paths (CLAUDE.md §6.5) once the
+/// diagnostic has been written to UART.  Under `cfg(test)` it panics instead,
+/// so host tests can assert that a fatal path was taken.
+pub fn halt() -> ! {
+    #[cfg(test)]
+    panic!("kernel halted");
+    #[cfg(not(test))]
+    loop {
+        // SAFETY: `wfi` only pauses the hart until an interrupt is pending;
+        // it has no other architectural effect.
+        #[cfg(target_arch = "riscv32")]
+        unsafe {
+            core::arch::asm!("wfi")
+        };
+        #[cfg(not(target_arch = "riscv32"))]
+        core::hint::spin_loop();
+    }
+}

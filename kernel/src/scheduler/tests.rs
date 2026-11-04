@@ -422,3 +422,36 @@ fn ccg_diamond_graph_mip_reaches_sink() {
     // D has no outgoing edges → MIP(D) = 7 (own priority)
     assert_eq!(mips[3], 7, "MIP(D) equals own priority");
 }
+
+// ---------------------------------------------------------------------------
+// Preemption rule (#103)
+// ---------------------------------------------------------------------------
+
+use crate::scheduler::{should_preempt, TIME_QUANTUM_TICKS};
+
+#[test]
+fn preempts_for_strictly_higher_priority() {
+    assert!(should_preempt(2, Some(3), 0));
+}
+
+#[test]
+fn no_preemption_when_queue_empty() {
+    assert!(!should_preempt(0, None, TIME_QUANTUM_TICKS * 10));
+}
+
+#[test]
+fn no_preemption_by_lower_priority_even_after_quantum() {
+    // M (eff 2) must never preempt L (eff 3): the CA-PIP guarantee.
+    assert!(!should_preempt(3, Some(2), TIME_QUANTUM_TICKS * 10));
+}
+
+#[test]
+fn equal_priority_waits_for_quantum() {
+    assert!(!should_preempt(3, Some(3), TIME_QUANTUM_TICKS - 1));
+    assert!(should_preempt(3, Some(3), TIME_QUANTUM_TICKS));
+}
+
+#[test]
+fn idle_is_preempted_by_any_real_task() {
+    assert!(should_preempt(0, Some(1), 0));
+}

@@ -2,9 +2,10 @@
 //!
 //! The entry stub (`__trap_entry`) is written in assembly and placed in the
 //! `.trap` section so the linker script can locate it for `mtvec`.  It saves
-//! the full machine state into a `TrapFrame` on the kernel stack, then calls
-//! the Rust [`trap_handler`] function.  On return it restores the state and
-//! executes `mret`.
+//! the full machine state into a `TrapFrame` on the interrupted task's stack,
+//! then calls the Rust [`trap_handler`] function, which returns the frame to
+//! resume.  The stub switches `sp` to that frame, restores it, and executes
+//! `mret` — so returning another task's frame *is* the context switch.
 //!
 //! # Why `global_asm!` instead of `#[naked]`?
 //!
@@ -35,13 +36,12 @@ global_asm!(
     ".align 2",                     // mtvec requires 4-byte alignment
     "__trap_entry:",
 
-    // --- Allocate TrapFrame on the stack (36 × 4 = 144 bytes) ---
+    // --- Allocate TrapFrame on the interrupted task's stack (144 bytes) ---
     "addi sp, sp, -144",
 
-    // Save all 32 GPRs.  x0 (zero) is written as 0 for index uniformity.
+    // Save all GPRs except sp.  x0 (zero) is written as 0 for index uniformity.
     "sw   x0,   0(sp)",
     "sw   ra,   4(sp)",
-    "sw   sp,   8(sp)",             // sp already decremented; records the trap-time value
     "sw   gp,  12(sp)",
     "sw   tp,  16(sp)",
     "sw   t0,  20(sp)",
@@ -72,24 +72,33 @@ global_asm!(
     "sw   t5, 120(sp)",
     "sw   t6, 124(sp)",
 
-    // Save trap CSRs using t0 as a scratch register.
-    // t0 was already saved at offset 20, so reusing it is safe.
+    // regs[2] must hold the interrupted context's sp, i.e. the value before
+    // the frame was allocated.  Storing the decremented sp here would make
+    // every trap return 144 bytes lower on the stack.
+    "addi t0, sp, 144",
+    "sw   t0,   8(sp)",
+
+    // Save trap CSRs using t0 as a scratch register (already saved above).
     "csrr t0, mepc",    "sw t0, 128(sp)",   // mepc    → offset 0x80
     "csrr t0, mstatus", "sw t0, 132(sp)",   // mstatus → offset 0x84
     "csrr t0, mcause",  "sw t0, 136(sp)",   // mcause  → offset 0x88
     "csrr t0, mtval",   "sw t0, 140(sp)",   // mtval   → offset 0x8C
 
-    // Pass TrapFrame pointer as the first (and only) argument.
-    "mv a0, sp",
+    // trap_handler(frame) returns the frame to resume in a0 — the same frame,
+    // or another task's saved frame when the scheduler switches.
+    "mv   a0, sp",
     "call trap_handler",
 
-    // Restore CSRs from (possibly modified) TrapFrame before GPRs so that
-    // t0 is still available as a scratch register.
+    // --- Restore path; also the entry point for starting the first task ---
+    ".global __restore_context",
+    "__restore_context:",
+    "mv   sp, a0",
+
+    // Restore CSRs before GPRs so that t0 is still free as scratch.
     "lw t0, 128(sp)", "csrw mepc,    t0",
     "lw t0, 132(sp)", "csrw mstatus, t0",
-    // mcause and mtval are read-only from software; no restore needed.
+    // mcause and mtval need no restore.
 
-    // Restore all GPRs.
     "lw   ra,   4(sp)",
     "lw   gp,  12(sp)",
     "lw   tp,  16(sp)",
@@ -121,54 +130,93 @@ global_asm!(
     "lw   t5, 120(sp)",
     "lw   t6, 124(sp)",
 
-    // sp last: restoring it before the other registers would corrupt the frame.
+    // sp last: it is the base register for every load above.
     "lw   sp,   8(sp)",
 
     "mret",
 );
 
+#[cfg(target_arch = "riscv32")]
+extern "C" {
+    fn __restore_context(frame: *mut TrapFrame) -> !;
+}
+
+/// Start executing the task whose saved frame is `frame`.  Never returns.
+///
+/// Used once on the boot path to leave the boot stack and enter the first
+/// task: it runs the trap exit sequence, so `mret` applies the frame's
+/// `mstatus` (enabling interrupts via `MPIE`) and jumps to its `mepc`.
+///
+/// # Safety
+///
+/// `frame` must point to a valid frame built by [`super::init_frame`] (or
+/// saved by the trap entry stub), and `mtvec` must already point at
+/// `__trap_entry` so the first interrupt is handled.
+#[cfg(target_arch = "riscv32")]
+pub unsafe fn start_first_task(frame: *mut TrapFrame) -> ! {
+    // SAFETY: delegated to the caller (see the function's Safety section).
+    unsafe { __restore_context(frame) }
+}
+
 /// Machine-mode trap dispatcher.
 ///
 /// Called from `__trap_entry` with a pointer to the fully saved [`TrapFrame`].
-/// Modifying `frame.mepc` before returning will change the resume address.
+/// Returns the frame to resume: `frame` itself to continue the interrupted
+/// task, or another task's saved frame to switch to it.  Modifying the
+/// returned frame's `mepc` changes the resume address.
 ///
 /// # Safety
 ///
 /// Must only be called from `__trap_entry` with a valid, stack-allocated
 /// `TrapFrame`.  `frame` must remain valid for the duration of this function.
 #[no_mangle]
-pub unsafe extern "C" fn trap_handler(frame: *mut TrapFrame) {
-    // SAFETY: __trap_entry guarantees the frame is fully initialised and
-    // exclusively owned by this call (no re-entrant traps in M-mode).
-    let frame = unsafe { &mut *frame };
+pub unsafe extern "C" fn trap_handler(frame: *mut TrapFrame) -> *mut TrapFrame {
+    // SAFETY: __trap_entry passes a fully initialised frame that it owns
+    // exclusively for the duration of this call (traps do not nest: MIE is
+    // cleared on trap entry and stays clear until mret).
+    let f = unsafe { &mut *frame };
 
     // Bit 31 set → interrupt; clear → synchronous exception.
-    let is_interrupt = (frame.mcause >> 31) & 1 == 1;
-    let cause_code   = frame.mcause & !(1 << 31);
+    let is_interrupt = (f.mcause >> 31) & 1 == 1;
+    let cause_code = f.mcause & !(1 << 31);
 
     if is_interrupt {
         match cause_code {
             // Machine timer interrupt (MTIE, cause code 7).
-            7 => crate::clint::timer_isr(),
+            7 => crate::scheduler::on_timer_interrupt(frame),
             _ => {
                 uart::uart_puts("[TRAP] unhandled interrupt cause=");
-                uart::uart_print_hex(frame.mcause);
+                uart::uart_print_hex(f.mcause);
                 uart::uart_puts("\n");
+                frame
             }
         }
     } else {
-        uart::uart_puts("[TRAP] exception mcause=");
-        uart::uart_print_hex(frame.mcause);
-        uart::uart_puts(" mepc=");
-        uart::uart_print_hex(frame.mepc);
-        uart::uart_puts(" mtval=");
-        uart::uart_print_hex(frame.mtval);
-        uart::uart_puts("\n");
-        // Advance past the faulting instruction so we can continue.
-        // For a real kernel this would terminate the offending task; for now
-        // we skip forward by the compressed (2-byte) or full (4-byte) width.
-        // bit 0 and bit 1 both set → 32-bit instruction.
-        let instr_len = if (frame.mepc & 0x3) == 0x3 { 4 } else { 2 };
-        frame.mepc += instr_len;
+        match cause_code {
+            // Environment call from U-mode (8) or M-mode (11): a syscall.
+            // `ecall` is always a 4-byte instruction; resume after it.
+            8 | 11 => {
+                f.mepc += 4;
+                crate::syscall::dispatch(frame)
+            }
+            _ => fault_and_halt(f),
+        }
     }
+}
+
+/// Print a fault record for an unexpected exception and halt.
+///
+/// Per CLAUDE.md §6.5 a runtime hardware fault is not recoverable: the
+/// faulting task is never resumed.
+fn fault_and_halt(f: &TrapFrame) -> ! {
+    uart::uart_puts("[FAULT] exception mcause=");
+    uart::uart_print_hex(f.mcause);
+    uart::uart_puts(" mepc=");
+    uart::uart_print_hex(f.mepc);
+    uart::uart_puts(" mtval=");
+    uart::uart_print_hex(f.mtval);
+    uart::uart_puts(" task=");
+    uart::uart_print_usize(crate::scheduler::current_task_idx() as usize);
+    uart::uart_puts("\nSystem halted.\n");
+    crate::halt()
 }

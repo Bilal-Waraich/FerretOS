@@ -8,9 +8,14 @@
 //! 2. **MIP write** (`write_precomputed_mip`) — O(N) copy from the const array
 //!    into each `TaskDescriptor.max_inherited_priority`.
 //! 3. **Ready queue** (`queue.rs`) — static max-heap keyed by `effective_priority`.
-//! 4. **Preemption check** (this file) — called from the timer ISR.  Compares the
-//!    running task's `effective_priority` with the head of the ready queue; triggers
-//!    a context switch when a higher-priority task becomes the head.
+//! 4. **Dispatch** (this file) — the trap path saves the running task's frame
+//!    pointer, then [`on_timer_interrupt`], [`yield_current`] or
+//!    [`sleep_current`] decide which task's frame to resume.  Returning a
+//!    different frame to the trap stub *is* the context switch.
+//! 5. **Preemption rule** — on each tick, switch when the head of the ready
+//!    queue has a strictly higher effective priority than the running task, or
+//!    when the running task's quantum has expired and an equal-priority task is
+//!    waiting (round-robin; the queue is FIFO among equal priorities).
 //!
 //! `ccg.rs` and `mip.rs` are retained for their unit-test coverage but are not
 //! called at boot.
@@ -29,8 +34,9 @@ pub mod queue;
 mod tests;
 
 use crate::config::MAX_TASKS;
+use crate::context::TrapFrame;
 use crate::generated::ccg_constants::MAX_INHERITED_PRIORITIES;
-use crate::memory::task::{registry, task_count, task_registry_ptr, TaskDescriptor};
+use crate::memory::task::{task_count, task_registry_ptr, TaskDescriptor, TaskState};
 use queue::PriorityQueue;
 
 // ccg and mip modules are retained for their test coverage; they are no
@@ -53,7 +59,7 @@ pub const TIME_QUANTUM_TICKS: u32 = 5;
 pub const SWITCH_LATENCY_WARN_CYCLES: u32 = 1_000;
 
 /// Number of context switches to accumulate before printing latency stats.
-const SWITCH_STATS_WINDOW: u32 = 1_000;
+const SWITCH_STATS_WINDOW: u32 = 100;
 
 // ---------------------------------------------------------------------------
 // Context-switch latency statistics (Issue #41)
@@ -106,20 +112,44 @@ impl SwitchStats {
 }
 
 // ---------------------------------------------------------------------------
-// Scheduler state — populated at boot, used by the timer ISR.
+// Scheduler state — populated at boot, used by the trap path.
 // ---------------------------------------------------------------------------
 
-/// Global ready queue — max-heap keyed by effective priority.
+/// Registry index meaning "no task is running" (boot, before the first dispatch).
+pub const NO_TASK: u8 = 0xFF;
+
+/// Global ready queue — max-heap keyed by effective priority, FIFO among equals.
 static mut READY_QUEUE: PriorityQueue<MAX_TASKS> = PriorityQueue::new();
 
-/// Registry index of the currently running task (0xFF = none / idle).
-static mut CURRENT_TASK_IDX: u8 = 0xFF;
+/// Registry index of the currently running task.
+static mut CURRENT_TASK_IDX: u8 = NO_TASK;
 
-/// Number of ticks the current task has run without being preempted.
+/// Number of ticks the current task has run without being switched out.
 static mut TICKS_SINCE_SWITCH: u32 = 0;
 
 /// Context-switch latency statistics accumulator.
 static mut SWITCH_STATS: SwitchStats = SwitchStats::new();
+
+/// Raw pointer to the descriptor in registry slot `idx`, or null if empty.
+///
+/// The runtime scheduler mutates descriptors (state, saved frame, wake tick)
+/// through raw pointers only, never through the `&'static` slice returned by
+/// [`crate::memory::task::registry`], so no shared reference is alive across a write.
+fn task_ptr(idx: u8) -> *mut TaskDescriptor {
+    if idx as usize >= MAX_TASKS {
+        return core::ptr::null_mut();
+    }
+    // SAFETY: `idx < MAX_TASKS`, so the element pointer is in bounds.  Only a
+    // raw pointer is formed; callers dereference it on the single hart with
+    // interrupts disabled.
+    unsafe {
+        let slot = core::ptr::addr_of_mut!((*task_registry_ptr())[idx as usize]);
+        match (*slot).as_mut() {
+            Some(t) => t as *mut TaskDescriptor,
+            None => core::ptr::null_mut(),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Boot-time initialisation
@@ -130,19 +160,12 @@ static mut SWITCH_STATS: SwitchStats = SwitchStats::new();
 /// build.rs parsed demo_tasks.rs, built the CCG, and ran BFS on the host
 /// (with alloc) to populate `MAX_INHERITED_PRIORITIES`.  This call simply
 /// copies those values — O(N) writes, zero graph traversal at boot.
-///
-/// # Safety invariant
-///
-/// Must be called on the single-threaded boot path before interrupts fire.
 fn write_precomputed_mip() {
-    let n = task_count();
-    // SAFETY: single-threaded boot path, no concurrent writes.
-    unsafe {
-        let reg_ptr: *mut [Option<TaskDescriptor>; MAX_TASKS] = task_registry_ptr();
-        for (i, &mip) in MAX_INHERITED_PRIORITIES.iter().enumerate().take(n) {
-            if let Some(slot) = (*reg_ptr)[i].as_mut() {
-                slot.max_inherited_priority = mip;
-            }
+    for (i, &mip) in MAX_INHERITED_PRIORITIES.iter().enumerate().take(task_count()) {
+        let t = task_ptr(i as u8);
+        if !t.is_null() {
+            // SAFETY: single-threaded boot path; `t` points into the registry.
+            unsafe { (*t).max_inherited_priority = mip };
         }
     }
 }
@@ -151,7 +174,7 @@ fn write_precomputed_mip() {
 ///
 /// 1. Writes precomputed MIP into every `TaskDescriptor` (from build.rs constants).
 /// 2. Enqueues all `Ready` tasks into the ready queue.
-/// 3. Sets the highest-priority task as the current task.
+/// 3. Selects the highest-priority task as the first to run.
 ///
 /// # Safety invariant
 ///
@@ -160,112 +183,254 @@ fn write_precomputed_mip() {
 pub fn init() {
     write_precomputed_mip();
 
-    // Read registry after MIP has been written.
-    let reg = registry();
-
-    // SAFETY: single-threaded boot path; no ISR can fire yet.
-    // addr_of_mut! avoids creating a Rust reference to the mutable statics,
-    // which is UB-prone under the Rust 2024 static-mut-refs rules.
+    // SAFETY: single-threaded boot path; no trap can fire yet.
     unsafe {
         let rq = core::ptr::addr_of_mut!(READY_QUEUE);
-        for (i, slot) in reg.iter().enumerate() {
-            if let Some(task) = slot {
-                if task.state == crate::memory::task::TaskState::Ready {
-                    (*rq).insert(i as u8, task.effective_priority());
-                }
+        for i in 0..task_count() {
+            let t = task_ptr(i as u8);
+            if !t.is_null() && (*t).state == TaskState::Ready {
+                (*rq).insert(i as u8, (*t).effective_priority());
             }
         }
-
-        // The head of the queue becomes the initially running task.
         if let Some(idx) = (*rq).pop_max() {
-            *core::ptr::addr_of_mut!(CURRENT_TASK_IDX) = idx;
-            *core::ptr::addr_of_mut!(TICKS_SINCE_SWITCH) = 0;
+            mark_running(idx);
         }
     }
 }
 
+/// Build every registered task's initial trap frame at the top of its stack.
+///
+/// `exit_trap` is installed as each task's return address, `gp` is the
+/// kernel's global pointer (tasks share the kernel image), and `mstatus` is
+/// the status word each task starts with.
+///
+/// # Safety
+///
+/// Boot path only, before the first task is started.  Every registered task
+/// must have a non-zero `entry` and a stack of at least `TRAP_FRAME_SIZE`
+/// bytes at `[stack_base, stack_base + stack_size)` that nothing else uses.
+pub unsafe fn prepare_frames(exit_trap: usize, gp: usize, mstatus: usize) {
+    for i in 0..task_count() {
+        let t = task_ptr(i as u8);
+        if t.is_null() {
+            continue;
+        }
+        // SAFETY: boot path; `t` points into the registry and the caller
+        // guarantees the stack bounds and entry point.
+        unsafe {
+            let top = (*t).stack_base + (*t).stack_size;
+            let frame = crate::context::init_frame(top, (*t).entry, exit_trap, gp, mstatus);
+            (*t).stack_ptr = frame as usize;
+        }
+    }
+}
+
+/// Saved frame of the task selected by [`init`], for the first dispatch.
+pub fn first_frame() -> *mut TrapFrame {
+    frame_of(current_task_idx())
+}
+
 // ---------------------------------------------------------------------------
-// Runtime preemption (called from timer ISR)
+// Runtime — called from the trap path with interrupts disabled.
 // ---------------------------------------------------------------------------
 
-/// Preemption check — called on every timer tick from the machine-timer ISR.
+/// Saved frame pointer of task `idx`.
+fn frame_of(idx: u8) -> *mut TrapFrame {
+    let t = task_ptr(idx);
+    if t.is_null() {
+        return core::ptr::null_mut();
+    }
+    // SAFETY: `t` points into the registry; read on the trap path.
+    unsafe { (*t).stack_ptr as *mut TrapFrame }
+}
+
+/// Record `frame` as the running task's saved context.
+fn save_current(frame: *mut TrapFrame) {
+    let t = task_ptr(current_task_idx());
+    if !t.is_null() {
+        // SAFETY: trap path, interrupts disabled, single hart.
+        unsafe { (*t).stack_ptr = frame as usize };
+    }
+}
+
+/// Make `idx` the running task.
+fn mark_running(idx: u8) {
+    // SAFETY: trap path or boot path; single hart, interrupts disabled.
+    unsafe {
+        *core::ptr::addr_of_mut!(CURRENT_TASK_IDX) = idx;
+        *core::ptr::addr_of_mut!(TICKS_SINCE_SWITCH) = 0;
+        let t = task_ptr(idx);
+        if !t.is_null() {
+            (*t).state = TaskState::Running;
+        }
+    }
+}
+
+/// Pop the best ready task and make it current; return its frame.
 ///
-/// Returns `Some(new_task_idx)` when the scheduler decides to switch away from
-/// the current task, `None` when the current task continues running.
+/// The kernel always registers an idle task, so the queue is never empty
+/// once the current task has blocked.  An empty queue therefore means the
+/// idle task is missing — a boot configuration error.
+fn dispatch_next() -> *mut TrapFrame {
+    // SAFETY: trap path, interrupts disabled, single hart.
+    let next = unsafe { (*core::ptr::addr_of_mut!(READY_QUEUE)).pop_max() };
+    match next {
+        Some(idx) => {
+            mark_running(idx);
+            frame_of(idx)
+        }
+        None => {
+            crate::uart::uart_puts("[FAULT] no runnable task (idle task missing)\nSystem halted.\n");
+            crate::halt()
+        }
+    }
+}
+
+/// Return the running task to the ready queue.
+fn requeue_current() {
+    let idx = current_task_idx();
+    let t = task_ptr(idx);
+    if !t.is_null() {
+        // SAFETY: trap path, interrupts disabled, single hart.
+        unsafe {
+            (*t).state = TaskState::Ready;
+            (*core::ptr::addr_of_mut!(READY_QUEUE)).insert(idx, (*t).effective_priority());
+        }
+    }
+}
+
+/// Whether tick `now` has reached `deadline`, tolerant of `u32` wraparound.
+fn tick_reached(now: u32, deadline: u32) -> bool {
+    (now.wrapping_sub(deadline) as i32) >= 0
+}
+
+/// Move every sleeping task whose wake tick has arrived back to `Ready`.
 ///
-/// The caller (trap handler) is responsible for invoking `__context_switch`
-/// when `Some` is returned.
+/// O(N) over the registry, N ≤ MAX_TASKS.
+fn wake_sleepers(now: u32) {
+    for i in 0..task_count() {
+        let t = task_ptr(i as u8);
+        // SAFETY: trap path, interrupts disabled, single hart.
+        unsafe {
+            if !t.is_null() && (*t).state == TaskState::Blocked && tick_reached(now, (*t).wake_at) {
+                (*t).state = TaskState::Ready;
+                (*core::ptr::addr_of_mut!(READY_QUEUE)).insert(i as u8, (*t).effective_priority());
+            }
+        }
+    }
+}
+
+/// Halt with a diagnostic if any task's stack canary has been overwritten.
+///
+/// Runs on every tick so an overflow is caught within one quantum (#69).
+fn check_stack_canaries() {
+    for i in 0..task_count() {
+        let t = task_ptr(i as u8);
+        if t.is_null() {
+            continue;
+        }
+        // SAFETY: `stack_base` is the start of the task's `Stack<N>`, whose
+        // first 4 bytes hold the canary (written by `Stack::new`).
+        let intact = unsafe { crate::memory::stack::canary_intact((*t).stack_base) };
+        if !intact {
+            crate::uart::uart_puts("[FAULT] stack overflow: canary overwritten in task ");
+            crate::uart::uart_print_usize(i);
+            crate::uart::uart_puts("\nSystem halted.\n");
+            crate::halt();
+        }
+    }
+}
+
+/// Decide whether the running task should be switched out on this tick.
+///
+/// Pure function of the scheduling state so it can be unit-tested:
+/// switch when a strictly higher effective priority is waiting, or when the
+/// quantum has expired and an equal-or-higher priority task is waiting.
+pub fn should_preempt(cur_eff: u8, next_eff: Option<u8>, ticks_since_switch: u32) -> bool {
+    match next_eff {
+        None => false,
+        Some(next) => {
+            next > cur_eff || (ticks_since_switch >= TIME_QUANTUM_TICKS && next >= cur_eff)
+        }
+    }
+}
+
+/// Machine-timer interrupt: advance time, wake sleepers, maybe preempt.
+///
+/// Returns the frame to resume — `frame` itself, or the next task's frame.
+pub fn on_timer_interrupt(frame: *mut TrapFrame) -> *mut TrapFrame {
+    let isr_entry = crate::clint::get_mtime() as u32;
+    let now = crate::clint::timer_isr();
+    save_current(frame);
+    check_stack_canaries();
+    wake_sleepers(now);
+
+    match tick(isr_entry) {
+        Some(_) => frame_of(current_task_idx()),
+        None => frame,
+    }
+}
+
+/// Preemption check for one timer tick.
+///
+/// Returns `Some(new_task_idx)` when the scheduler switched away from the
+/// current task, `None` when the current task continues.  Records the
+/// decision latency (ISR entry → switch decided) for #41 statistics.
 ///
 /// # Arguments
 ///
-/// * `ticks` — `mtime` value sampled at ISR entry; used to measure the
-///   preemption-decision latency for Issue #41 statistics.
-///
-/// # Safety invariant
-///
-/// Must only be called from the machine-mode trap handler (M-mode, interrupts
-/// disabled at entry).  READY_QUEUE and CURRENT_TASK_IDX are accessed without
-/// a lock; correctness relies on single-hart, interrupt-disabled execution.
-pub fn tick(ticks: u32) -> Option<u8> {
-    // SAFETY: called from M-mode trap handler with interrupts disabled.
-    // Single-hart; no concurrent access to scheduler state.
-    // addr_of_mut! avoids creating Rust references to mutable statics
-    // (UB-prone under the Rust 2024 static-mut-refs rules).
+/// * `isr_entry` — low 32 bits of `mtime` sampled at ISR entry.
+pub fn tick(isr_entry: u32) -> Option<u8> {
+    // SAFETY: trap path, interrupts disabled, single hart; scheduler statics
+    // are accessed only through raw pointers.
     unsafe {
         let ticks_ptr = core::ptr::addr_of_mut!(TICKS_SINCE_SWITCH);
-        let cur_ptr   = core::ptr::addr_of_mut!(CURRENT_TASK_IDX);
-        let rq        = core::ptr::addr_of_mut!(READY_QUEUE);
-
+        let rq = core::ptr::addr_of_mut!(READY_QUEUE);
         *ticks_ptr = (*ticks_ptr).wrapping_add(1);
 
-        let cur_idx = *cur_ptr as usize;
-        let reg = registry();
+        let cur_idx = current_task_idx();
+        let cur = task_ptr(cur_idx);
+        let cur_eff = if cur.is_null() { 0 } else { (*cur).effective_priority() };
+        let next_eff = if (*rq).is_empty() { None } else { Some((*rq).peek_max_priority()) };
 
-        // Determine effective priority of the running task.
-        let cur_eff = reg
-            .get(cur_idx)
-            .and_then(|s| s.as_ref())
-            .map_or(0, |t| t.effective_priority());
-
-        // Determine effective priority of the best ready task.
-        let next_eff = (*rq).peek_max_priority();
-
-        // Preempt if a strictly higher-priority task is waiting, OR if the
-        // quantum has expired and a same-or-higher priority task is waiting.
-        let quantum_expired = *ticks_ptr >= TIME_QUANTUM_TICKS;
-        let should_switch =
-            next_eff > cur_eff
-            || (quantum_expired && next_eff >= cur_eff && !(*rq).is_empty());
-
-        if should_switch {
-            // Move the current task back to the ready queue.
-            if let Some(t) = reg.get(cur_idx).and_then(|s| s.as_ref()) {
-                (*rq).insert(*cur_ptr, t.effective_priority());
-            }
-
-            // Pop the new task.
-            if let Some(next_idx) = (*rq).pop_max() {
-                let old_idx = *cur_ptr;
-                *cur_ptr = next_idx;
-                *ticks_ptr = 0;
-
-                if next_idx != old_idx {
-                    // Measure the decision latency from ISR entry (ticks is
-                    // the mtime value sampled by the caller at ISR entry).
-                    let now = crate::clint::get_mtime() as u32;
-                    let elapsed = now.wrapping_sub(ticks);
-                    // SAFETY: SWITCH_STATS accessed only in M-mode ISR with
-                    // interrupts disabled; no concurrent access possible.
-                    let stats = core::ptr::addr_of_mut!(SWITCH_STATS);
-                    (*stats).record(elapsed);
-
-                    return Some(next_idx);
-                }
-            }
+        if !should_preempt(cur_eff, next_eff, *ticks_ptr) {
+            return None;
         }
 
-        None
+        requeue_current();
+        dispatch_next();
+        let next_idx = current_task_idx();
+        if next_idx == cur_idx {
+            return None;
+        }
+
+        let elapsed = (crate::clint::get_mtime() as u32).wrapping_sub(isr_entry);
+        (*core::ptr::addr_of_mut!(SWITCH_STATS)).record(elapsed);
+        Some(next_idx)
     }
+}
+
+/// `SYS_YIELD`: requeue the caller behind its equal-priority peers and
+/// dispatch the best ready task (possibly the caller again).
+pub fn yield_current(frame: *mut TrapFrame) -> *mut TrapFrame {
+    save_current(frame);
+    requeue_current();
+    dispatch_next()
+}
+
+/// `SYS_SLEEP`: block the caller for `ticks` ticks (minimum 1) and dispatch
+/// the best ready task.
+pub fn sleep_current(frame: *mut TrapFrame, ticks: u32) -> *mut TrapFrame {
+    save_current(frame);
+    let t = task_ptr(current_task_idx());
+    if !t.is_null() {
+        // SAFETY: trap path, interrupts disabled, single hart.
+        unsafe {
+            (*t).state = TaskState::Blocked;
+            (*t).wake_at = crate::clint::ticks().wrapping_add(ticks.max(1));
+        }
+    }
+    dispatch_next()
 }
 
 /// Return the registry index of the currently running task.
