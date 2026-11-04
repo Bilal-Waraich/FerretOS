@@ -113,3 +113,8 @@ jobs:
       #    with PMP and must land without it (#89).
       - name: PMP violation integration test
         run: bash tests/integration/pmp_fault_test.sh
+
+      # 10. Context-switch latency with and without PMP (#88).  Fails if the
+      #     worst case exceeds the 1000-instruction budget.
+      - name: Context-switch latency comparison
+        run: bash scripts/switch_latency.sh

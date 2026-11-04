@@ -146,6 +146,24 @@ pub fn start_ticks() {
     }
 }
 
+/// Read the low 32 bits of `minstret`, the retired-instruction counter.
+///
+/// Used to measure kernel path lengths.  Unlike `mtime`, which QEMU advances
+/// with host wall-clock time, `minstret` counts the guest's own instructions,
+/// so measurements are deterministic and independent of host load.  Returns
+/// 0 on non-RISC-V hosts.
+pub fn instret() -> u32 {
+    #[cfg(target_arch = "riscv32")]
+    {
+        let v: u32;
+        // SAFETY: reading minstret has no side effects; M-mode only.
+        unsafe { core::arch::asm!("csrr {}, minstret", out(reg) v, options(nomem, nostack)) };
+        v
+    }
+    #[cfg(not(target_arch = "riscv32"))]
+    0
+}
+
 /// Return the current tick count.
 pub fn ticks() -> u32 {
     TICK_COUNT.load(Ordering::Relaxed)
