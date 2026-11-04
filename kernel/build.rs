@@ -9,8 +9,8 @@
 //      is not built; the committed generated files are used instead.
 //   3. CCG constant emission — parse src/generated/demo_tasks.rs, compute the
 //      Capability Contention Graph and MaxInheritedPriority on the host (with
-//      alloc), and write src/generated/ccg_constants.rs.  This eliminates all
-//      boot-time graph traversal from the kernel binary.
+//      alloc, via build/ccg_gen.rs), and write src/generated/ccg_constants.rs.
+//      This eliminates all boot-time graph traversal from the kernel binary.
 //
 // OML binary resolution order:
 //   1. OML_BIN env var (set by CI or developer)
@@ -24,6 +24,9 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[path = "build/ccg_gen.rs"]
+mod ccg_gen;
 
 const MAX_TASKS: usize = 16;
 
@@ -80,187 +83,33 @@ fn main() {
 
     // --- CCG constant emission (closes #42) ---------------------------------
     // Always regenerate ccg_constants.rs from the committed demo_tasks.rs so
-    // the kernel never has to run CCG construction or MIP BFS at boot.
+    // the kernel never has to run CCG construction or MIP BFS at boot.  The
+    // algorithm lives in build/ccg_gen.rs, which the kernel's host unit tests
+    // also compile, so the generator is tested like any other kernel code.
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build/ccg_gen.rs");
     println!("cargo:rerun-if-changed=src/generated/demo_tasks.rs");
 
     let demo_tasks_path = out_dir.join("demo_tasks.rs");
     if demo_tasks_path.exists() {
         let src = std::fs::read_to_string(&demo_tasks_path)
             .expect("failed to read demo_tasks.rs");
-        let tasks = parse_task_configs(&src);
+        let tasks = ccg_gen::parse_task_configs(&src);
         if !tasks.is_empty() {
-            let mip = compute_mip(&tasks);
-            check_cycles_and_warn(&tasks);
-            emit_ccg_constants(&out_dir, &mip);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Task config parsing
-// ---------------------------------------------------------------------------
-
-#[derive(Debug)]
-struct TaskConfig {
-    priority: u8,
-    exclusive_cap_mask: u32,
-    required_cap_mask: u32,
-}
-
-/// Parse all `pub static TASK_*: TaskConfig = TaskConfig { ... };` blocks from
-/// a generated demo_tasks.rs.  Task order in the file must match registration
-/// order in kernel_main — the index into the returned Vec corresponds to the
-/// registry slot index written by `register_task`.
-fn parse_task_configs(src: &str) -> Vec<TaskConfig> {
-    let mut tasks = Vec::new();
-    // Split on each `pub static` declaration to get one block per task.
-    for block in src.split("pub static").skip(1) {
-        // Only process TaskConfig statics.
-        if !block.contains("TaskConfig") {
-            continue;
-        }
-        let priority          = parse_u8_field(block, "priority");
-        let exclusive_cap_mask = parse_u32_field(block, "exclusive_cap_mask");
-        let required_cap_mask  = parse_u32_field(block, "required_cap_mask");
-        tasks.push(TaskConfig { priority, exclusive_cap_mask, required_cap_mask });
-    }
-    tasks
-}
-
-fn parse_u8_field(block: &str, field: &str) -> u8 {
-    parse_u32_field(block, field) as u8
-}
-
-/// Extract the value of a named field from a Rust struct literal block.
-///
-/// Handles decimal (`0`, `4096`) and hexadecimal (`0x0000_0001`) literals with
-/// underscore separators.
-fn parse_u32_field(block: &str, field: &str) -> u32 {
-    for line in block.lines() {
-        let line = line.trim();
-        // Match lines like `field_name: value,`
-        if let Some(rest) = line.strip_prefix(field) {
-            if let Some(rest) = rest.trim_start().strip_prefix(':') {
-                let val = rest.trim().trim_end_matches(',').replace('_', "");
-                if let Some(hex) = val.strip_prefix("0x").or_else(|| val.strip_prefix("0X")) {
-                    return u32::from_str_radix(hex, 16).unwrap_or(0);
-                }
-                return val.parse::<u32>().unwrap_or(0);
-            }
-        }
-    }
-    0
-}
-
-// ---------------------------------------------------------------------------
-// Host-side CCG construction and MIP computation
-// ---------------------------------------------------------------------------
-
-/// Build the CCG adjacency matrix: `edges[l][h]` is true when task l holds a
-/// cap that task h requires.
-fn build_edges(tasks: &[TaskConfig]) -> Vec<Vec<bool>> {
-    let n = tasks.len();
-    let mut edges = vec![vec![false; n]; n];
-    for (l, tl) in tasks.iter().enumerate() {
-        for (h, th) in tasks.iter().enumerate() {
-            if l != h && (tl.exclusive_cap_mask & th.required_cap_mask) != 0 {
-                edges[l][h] = true;
-            }
-        }
-    }
-    edges
-}
-
-/// Compute MIP for every task via BFS over the CCG.  Returns a Vec where
-/// `mip[i]` = MaxInheritedPriority for registry slot i (seeded with own priority).
-fn compute_mip(tasks: &[TaskConfig]) -> Vec<u8> {
-    let n = tasks.len();
-    let edges = build_edges(tasks);
-    let mut mip: Vec<u8> = tasks.iter().map(|t| t.priority).collect();
-
-    for src in 0..n {
-        let mut visited = vec![false; n];
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(src);
-        visited[src] = true;
-        while let Some(cur) = queue.pop_front() {
-            if tasks[cur].priority > mip[src] {
-                mip[src] = tasks[cur].priority;
-            }
-            for (succ, &is_edge) in edges[cur].iter().enumerate() {
-                if is_edge && !visited[succ] {
-                    visited[succ] = true;
-                    queue.push_back(succ);
-                }
-            }
-        }
-    }
-    mip
-}
-
-/// DFS cycle detection; emit `cargo:warning` for each back-edge found.
-fn check_cycles_and_warn(tasks: &[TaskConfig]) {
-    let n = tasks.len();
-    let edges = build_edges(tasks);
-    let mut visited   = vec![false; n];
-    let mut rec_stack = vec![false; n];
-
-    for start in 0..n {
-        if !visited[start] {
-            dfs_cycle(start, &edges, &mut visited, &mut rec_stack);
-        }
-    }
-}
-
-fn dfs_cycle(u: usize, edges: &[Vec<bool>], visited: &mut Vec<bool>, rec: &mut Vec<bool>) {
-    visited[u] = true;
-    rec[u] = true;
-    for v in 0..edges[u].len() {
-        if edges[u][v] {
-            if !visited[v] {
-                dfs_cycle(v, edges, visited, rec);
-            } else if rec[v] {
+            let mip = ccg_gen::compute_mip(&tasks);
+            for (from, to) in ccg_gen::find_cycle_back_edges(&tasks) {
                 println!(
                     "cargo:warning=CCG cycle detected: task {} → task {} → ... \
                      Mutual block — check capability declarations in tasks/demo_tasks.oml.",
-                    u, v
+                    from, to
                 );
             }
+            write_if_changed(
+                &out_dir.join("ccg_constants.rs"),
+                &ccg_gen::render_ccg_constants(&mip, MAX_TASKS),
+            );
         }
     }
-    rec[u] = false;
-}
-
-// ---------------------------------------------------------------------------
-// Emit ccg_constants.rs
-// ---------------------------------------------------------------------------
-
-/// Write `src/generated/ccg_constants.rs` containing a `[u8; MAX_TASKS]` array
-/// of precomputed MIP values indexed by task registry slot.
-fn emit_ccg_constants(out_dir: &Path, mip: &[u8]) {
-    let mut array = [0u8; MAX_TASKS];
-    for (i, &m) in mip.iter().enumerate().take(MAX_TASKS) {
-        array[i] = m;
-    }
-
-    let entries: Vec<String> = array.iter().map(|v| v.to_string()).collect();
-    let content = format!(
-        "// Auto-generated by kernel/build.rs — do not edit manually.\n\
-         // Rebuild after editing tasks/demo_tasks.oml.\n\
-         //\n\
-         // MAX_INHERITED_PRIORITIES[i] = MaxInheritedPriority for task registry\n\
-         // slot i, computed via BFS over the Capability Contention Graph at\n\
-         // build time.  The scheduler writes these values into TaskDescriptor\n\
-         // at boot instead of running the BFS at runtime.\n\
-         //\n\
-         // Slot order matches task registration order in kernel_main:\n\
-         //   slot 0 = TASK_L, slot 1 = TASK_M, slot 2 = TASK_H\n\
-         pub const MAX_INHERITED_PRIORITIES: [u8; {max_tasks}] = [{entries}];\n",
-        max_tasks = MAX_TASKS,
-        entries = entries.join(", "),
-    );
-
-    write_if_changed(&out_dir.join("ccg_constants.rs"), &content);
 }
 
 // ---------------------------------------------------------------------------
