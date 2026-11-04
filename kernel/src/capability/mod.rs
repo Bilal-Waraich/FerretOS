@@ -20,5 +20,8 @@ pub mod wrappers;
 mod tests;
 
 pub use allocator::check_capability_conflicts;
-pub use types::{GpioCapability, I2cCapability, SpiCapability, UartCapability};
+pub use types::{
+    ConsoleCapability, GpioCapability, I2cCapability, SpiCapability, UartCapability,
+    CONSOLE_CAP_BIT, CONSOLE_PERIPHERAL_ID,
+};
 pub use wrappers::{ExclusiveCapability, SharedCapability};

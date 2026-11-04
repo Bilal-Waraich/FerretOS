@@ -201,3 +201,54 @@ modules compiled out of non-test builds that cannot happen.)
 `size_report.sh` also now counts `.data` toward the flash budget — its initial
 values are stored in flash and copied to RAM at reset — and looks for
 `llvm-size`/`llvm-nm` in the Rust sysroot.
+
+### Preemptive multitasking and the trap path — Issues #103, #85 ✅
+
+Every trap enters `__trap_entry`, which swaps `sp` with `mscratch` to land on
+the running task's **kernel stack** (one 1 KB stack per registry slot, in
+kernel `.bss`), saves a 144-byte `TrapFrame` at its top, and calls
+`trap_handler(frame) -> frame`. The handler returns the frame to resume; the
+exit path loads `sp` from it, sets `mscratch = frame + 144` (that task's
+kernel stack top) and executes `mret`. Returning another task's saved frame
+*is* the context switch.
+
+The frame is kept off the task's own stack because tasks run in U-mode and
+M-mode stores bypass PMP: a frame written at a task-chosen `sp` could
+overwrite arbitrary kernel memory.
+
+OML tasks start with `mstatus.MPP = U`; the kernel's idle task runs in M-mode
+because `wfi` is illegal in U-mode on QEMU. A lowest-priority PMP entry
+(entry 15, NAPOT over the whole address space, RWX) lets U-mode execute at
+all; per-task entries take precedence where they match.
+
+### Syscall ABI — Issues #103, #86 ✅
+
+Tasks call the kernel with `ecall` (`mcause` 8 from U-mode, 11 from M-mode).
+Wrappers live in `kernel/src/sys.rs`; the dispatcher in `kernel/src/syscall.rs`.
+
+| Register | Role |
+|---|---|
+| `a7` | syscall number |
+| `a0`, `a1` | arguments |
+| `a0` | return value, or an error code |
+
+| # | Name | Arguments | Returns | Notes |
+|---|---|---|---|---|
+| 0 | `yield` | — | 0 | Requeues the caller behind equal-priority peers. |
+| 1 | `sleep` | `a0` = ticks (min 1) | 0 | Caller is `Blocked` until the tick arrives. |
+| 2 | `log` | `a0` = address, `a1` = length | bytes written | Requires the console capability (`shared_cap_mask` bit 31). Length capped at 256. |
+| 3 | `now` | — | ticks since boot | 1 tick = 1 ms. |
+
+| Error | Value | Meaning |
+|---|---|---|
+| `ENOSYS` | `usize::MAX` | Unknown syscall number. |
+| `EPERM` | `usize::MAX - 1` | Caller lacks the required capability. |
+| `EFAULT` | `usize::MAX - 2` | Buffer not readable by the caller. |
+
+**Validation.** The kernel never dereferences a task pointer until the whole
+buffer `[addr, addr + len)` (overflow-checked) lies inside memory the caller
+may read itself: its own stack, or the read-only flash image `[_stext,
+_sidata)` (code and string constants). The task's declared `MemoryRegion` is
+not yet accepted, because demo regions are not backed by dedicated linker
+sections and can overlap kernel data (addressed with per-task PMP, #87). A
+`log` of a kernel address returns `EFAULT`; the boot test checks this.
