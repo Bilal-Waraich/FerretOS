@@ -3,9 +3,9 @@
 //! Compiled only for the RISC-V target (see `main.rs`).
 
 use crate::demo;
-use ferret::context::{trap, MSTATUS_MPIE, MSTATUS_MPP_MACHINE};
+use ferret::context::{boot_trap_stack_top, trap};
 use ferret::generated::demo_tasks::{TASK_H, TASK_L, TASK_M};
-use ferret::memory::task::{register_task, TaskDescriptor};
+use ferret::memory::task::{register_task, TaskDescriptor, TaskMode};
 use ferret::{capability, clint, memory, scheduler, uart};
 use riscv_rt::entry;
 
@@ -72,7 +72,8 @@ fn kernel_main() -> ! {
     register_task(TASK_H.into_descriptor(2, stack_h, demo::task_h));
     register_task(
         TaskDescriptor::new(3, IDLE_PRIORITY, stack_idle, memory::Stack::<1024>::size(), 0, 0)
-            .with_entry(demo::idle as usize),
+            .with_entry(demo::idle as usize)
+            .with_mode(TaskMode::Machine),
     );
 
     uart::uart_puts("Tasks registered: ");
@@ -84,13 +85,17 @@ fn kernel_main() -> ! {
     capability::check_capability_conflicts(memory::registry());
     uart::uart_puts("Capability check passed.\n");
 
-    // --- PMP configuration (feature = "pmp") -------------------------------
+    // --- PMP configuration ------------------------------------------------
+    // Per-task regions (feature = "pmp"), then the lowest-priority default
+    // grant that lets U-mode tasks execute at all.
     memory::configure_pmp();
+    memory::grant_user_default();
 
     // --- Scheduler init -------------------------------------------------------
     // Write precomputed MIP constants, populate the ready queue, and build
-    // each task's first trap frame.  Tasks run in M-mode for now (MPP = M);
-    // MPIE makes interrupts come on with the first mret.
+    // each task's first trap frame on its kernel stack.  OML tasks run in
+    // U-mode; the idle task runs in M-mode.  MPIE makes interrupts come on
+    // with the first mret.
     scheduler::init();
     let gp: usize;
     // SAFETY: reading gp has no side effects.  Tasks are linked into the
@@ -99,11 +104,7 @@ fn kernel_main() -> ! {
     // SAFETY: boot path, before any task runs; every registered task has an
     // entry point and its own statically allocated stack.
     unsafe {
-        scheduler::prepare_frames(
-            demo::task_returned as usize,
-            gp,
-            MSTATUS_MPP_MACHINE | MSTATUS_MPIE,
-        );
+        scheduler::prepare_frames(demo::task_returned as usize, gp);
     }
     uart::uart_puts("Scheduler initialised.\n");
 
@@ -112,11 +113,17 @@ fn kernel_main() -> ! {
     // --- Interrupt setup ----------------------------------------------------
     // Point mtvec at the trap entry stub.  Direct mode: bits[1:0] = 0 means
     // all traps dispatch to the same handler address.
-    // SAFETY: __trap_entry is 4-byte aligned in the .trap section.
+    // mscratch must hold a kernel stack top before the first trap: the
+    // entry stub swaps to it unconditionally.  Until the first task runs,
+    // that is the dedicated boot trap stack.
+    // SAFETY: __trap_entry is 4-byte aligned in the .trap section, and the
+    // boot trap stack is a static reserved for exactly this purpose.
     unsafe {
         core::arch::asm!(
+            "csrw mscratch, {stack}",
             "la t0, __trap_entry",
             "csrw mtvec, t0",
+            stack = in(reg) boot_trap_stack_top(),
             out("t0") _,
         );
     }

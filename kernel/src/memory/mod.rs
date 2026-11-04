@@ -15,7 +15,7 @@ pub mod region;
 pub mod stack;
 pub mod task;
 
-pub use pmp::configure_pmp;
+pub use pmp::{configure_pmp, grant_user_default};
 pub use region::{MemoryRegion, assert_no_overlap};
 pub use stack::Stack;
-pub use task::{TaskDescriptor, TaskState, register_task, registry, task_count};
+pub use task::{TaskDescriptor, TaskMode, TaskState, register_task, registry, task_count};

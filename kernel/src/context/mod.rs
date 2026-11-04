@@ -94,39 +94,92 @@ pub const REG_A7: usize = 17;
 
 /// `mstatus.MPP` = Machine mode (bits 12:11 = 0b11).
 pub const MSTATUS_MPP_MACHINE: usize = 0b11 << 11;
+/// `mstatus.MPP` = User mode (bits 12:11 = 0b00).
+pub const MSTATUS_MPP_USER: usize = 0;
 /// `mstatus.MPIE` (bit 7): interrupts are enabled after `mret`.
 pub const MSTATUS_MPIE: usize = 1 << 7;
 
-/// Build a task's first [`TrapFrame`] at the top of its stack.
+// ---------------------------------------------------------------------------
+// Per-task kernel stacks
+// ---------------------------------------------------------------------------
+
+/// Size of each task's kernel stack in bytes.
+///
+/// Holds one `TrapFrame` plus the trap handler's call chain (scheduler,
+/// syscall dispatch, UART diagnostics).  Traps never nest, so one frame per
+/// task is the maximum.
+pub const KERNEL_STACK_SIZE: usize = 1024;
+
+/// A task's kernel stack: where its `TrapFrame` lives and where the trap
+/// handler runs while servicing that task.
+///
+/// Kept in kernel memory, never in the task's own stack, so a U-mode task
+/// cannot direct the kernel's frame writes by choosing its `sp` — M-mode
+/// stores bypass PMP, so a frame saved at a task-controlled address could
+/// overwrite arbitrary kernel memory.
+#[repr(align(16))]
+pub struct KernelStack(#[allow(dead_code)] [u8; KERNEL_STACK_SIZE]);
+
+/// One kernel stack per registry slot, zero-initialised in `.bss`.
+static mut KERNEL_STACKS: [KernelStack; crate::config::MAX_TASKS] =
+    [const { KernelStack([0; KERNEL_STACK_SIZE]) }; crate::config::MAX_TASKS];
+
+/// Kernel stack for traps taken on the boot path, before the first task runs.
+static mut BOOT_TRAP_STACK: KernelStack = KernelStack([0; KERNEL_STACK_SIZE]);
+
+/// One-past-the-end address of registry slot `slot`'s kernel stack.
+///
+/// # Panics
+///
+/// Panics if `slot >= MAX_TASKS`.
+pub fn kernel_stack_top(slot: usize) -> usize {
+    assert!(slot < crate::config::MAX_TASKS, "kernel_stack_top: slot out of range");
+    // SAFETY: only the address of the element is formed; `slot` is in range.
+    let base = unsafe { core::ptr::addr_of!(KERNEL_STACKS[slot]) } as usize;
+    base + KERNEL_STACK_SIZE
+}
+
+/// One-past-the-end address of the boot-path trap stack.
+pub fn boot_trap_stack_top() -> usize {
+    core::ptr::addr_of!(BOOT_TRAP_STACK) as usize + KERNEL_STACK_SIZE
+}
+
+/// Build a task's first [`TrapFrame`] at the top of its kernel stack.
 ///
 /// When the trap exit path restores this frame the task starts at `entry`
-/// with `sp = stack_top`, interrupts enabled, and `ra` pointing at
-/// `exit_trap` so that a task body that returns is caught rather than jumping
-/// to address 0.
+/// with `sp = user_stack_top`, the privilege mode and interrupt state given
+/// by `mstatus`, and `ra` pointing at `exit_trap` so that a task body that
+/// returns is caught rather than jumping to address 0.
+///
+/// The frame must sit exactly `TRAP_FRAME_SIZE` bytes below the top of the
+/// kernel stack: the trap exit path derives the kernel stack top (for
+/// `mscratch`) from the frame address.
 ///
 /// Returns the frame address, which the scheduler stores as the task's
 /// `stack_ptr`.
 ///
 /// # Safety
 ///
-/// `stack_top` must be the 16-byte-aligned one-past-the-end address of a
-/// stack buffer of at least `TRAP_FRAME_SIZE` bytes that is owned by this task
-/// and not currently in use.
+/// `kernel_stack_top` must be the 16-byte-aligned one-past-the-end address of
+/// a kernel stack of at least `TRAP_FRAME_SIZE` bytes that belongs to this
+/// task and is not in use.
 pub unsafe fn init_frame(
-    stack_top: usize,
+    kernel_stack_top: usize,
+    user_stack_top: usize,
     entry: usize,
     exit_trap: usize,
     gp: usize,
     mstatus: usize,
 ) -> *mut TrapFrame {
-    let frame = (stack_top - TRAP_FRAME_SIZE) as *mut TrapFrame;
+    let frame = (kernel_stack_top - TRAP_FRAME_SIZE) as *mut TrapFrame;
     let mut regs = [0usize; 32];
     regs[REG_RA] = exit_trap;
-    regs[REG_SP] = stack_top;
+    regs[REG_SP] = user_stack_top;
     regs[REG_GP] = gp;
-    // SAFETY: the caller guarantees `[stack_top - TRAP_FRAME_SIZE, stack_top)`
-    // lies inside an unused stack owned by this task; the address is 16-byte
-    // aligned, which satisfies `TrapFrame`'s 4-byte alignment.
+    // SAFETY: the caller guarantees `[kernel_stack_top - TRAP_FRAME_SIZE,
+    // kernel_stack_top)` lies inside an unused kernel stack owned by this
+    // task; the address is 16-byte aligned, which satisfies `TrapFrame`'s
+    // alignment.
     unsafe {
         frame.write(TrapFrame { regs, mepc: entry, mstatus, mcause: 0, mtval: 0 });
     }
@@ -138,20 +191,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn init_frame_places_frame_below_stack_top() {
+    fn init_frame_places_frame_below_kernel_stack_top() {
         #[repr(align(16))]
         struct Buf([u8; 512]);
         let mut buf = Buf([0; 512]);
         let top = buf.0.as_mut_ptr() as usize + 512;
         // SAFETY: `buf` is an unused 512-byte, 16-aligned buffer.
-        let f = unsafe { init_frame(top, 0x1234, 0x5678, 0x9abc, MSTATUS_MPIE) };
+        let f = unsafe { init_frame(top, 0x4000, 0x1234, 0x5678, 0x9abc, MSTATUS_MPIE) };
         assert_eq!(f as usize, top - TRAP_FRAME_SIZE);
         // SAFETY: `f` was just initialised by `init_frame`.
         let f = unsafe { &*f };
         assert_eq!(f.mepc, 0x1234);
         assert_eq!(f.regs[REG_RA], 0x5678);
         assert_eq!(f.regs[REG_GP], 0x9abc);
-        assert_eq!(f.regs[REG_SP], top);
+        assert_eq!(f.regs[REG_SP], 0x4000);
         assert_eq!(f.mstatus, MSTATUS_MPIE);
+    }
+}
+
+#[cfg(test)]
+mod kernel_stack_tests {
+    use super::*;
+
+    #[test]
+    fn kernel_stacks_are_disjoint_and_aligned() {
+        for slot in 0..crate::config::MAX_TASKS {
+            let top = kernel_stack_top(slot);
+            assert_eq!(top % 16, 0);
+            if slot > 0 {
+                assert_eq!(top - kernel_stack_top(slot - 1), KERNEL_STACK_SIZE);
+            }
+        }
     }
 }

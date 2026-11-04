@@ -40,7 +40,7 @@ mod tests;
 use crate::config::MAX_TASKS;
 use crate::context::TrapFrame;
 use crate::generated::ccg_constants::MAX_INHERITED_PRIORITIES;
-use crate::memory::task::{task_count, task_registry_ptr, TaskDescriptor, TaskState};
+use crate::memory::task::{task_count, task_registry_ptr, TaskDescriptor, TaskMode, TaskState};
 use queue::PriorityQueue;
 
 /// Time quantum in timer ticks (1 tick = 1 ms by default).
@@ -195,31 +195,70 @@ pub fn init() {
     }
 }
 
-/// Build every registered task's initial trap frame at the top of its stack.
+/// Build every registered task's initial trap frame on its kernel stack.
 ///
-/// `exit_trap` is installed as each task's return address, `gp` is the
-/// kernel's global pointer (tasks share the kernel image), and `mstatus` is
-/// the status word each task starts with.
+/// `exit_trap` is installed as each task's return address and `gp` is the
+/// kernel's global pointer (tasks are linked into the kernel image).  Each
+/// task starts with interrupts enabled (`MPIE`) in its declared
+/// [`TaskMode`]: `MPP = U` for user tasks, `MPP = M` for kernel tasks.
 ///
 /// # Safety
 ///
 /// Boot path only, before the first task is started.  Every registered task
-/// must have a non-zero `entry` and a stack of at least `TRAP_FRAME_SIZE`
-/// bytes at `[stack_base, stack_base + stack_size)` that nothing else uses.
-pub unsafe fn prepare_frames(exit_trap: usize, gp: usize, mstatus: usize) {
+/// must have a non-zero `entry` and its own stack at
+/// `[stack_base, stack_base + stack_size)` that nothing else uses.
+pub unsafe fn prepare_frames(exit_trap: usize, gp: usize) {
+    use crate::context::{kernel_stack_top, MSTATUS_MPIE, MSTATUS_MPP_MACHINE, MSTATUS_MPP_USER};
     for i in 0..task_count() {
         let t = task_ptr(i as u8);
         if t.is_null() {
             continue;
         }
-        // SAFETY: boot path; `t` points into the registry and the caller
-        // guarantees the stack bounds and entry point.
+        // SAFETY: boot path; `t` points into the registry, the kernel stack
+        // for slot `i` is unused until this task first runs, and the caller
+        // guarantees the task's own stack bounds and entry point.
         unsafe {
-            let top = (*t).stack_base + (*t).stack_size;
-            let frame = crate::context::init_frame(top, (*t).entry, exit_trap, gp, mstatus);
+            let mpp = match (*t).mode {
+                TaskMode::User => MSTATUS_MPP_USER,
+                TaskMode::Machine => MSTATUS_MPP_MACHINE,
+            };
+            let frame = crate::context::init_frame(
+                kernel_stack_top(i),
+                (*t).stack_base + (*t).stack_size,
+                (*t).entry,
+                exit_trap,
+                gp,
+                mpp | MSTATUS_MPIE,
+            );
             (*t).stack_ptr = frame as usize;
         }
     }
+}
+
+/// Bitmask of tasks whose first syscall has been reported.
+static mut SYSCALL_SEEN: u32 = 0;
+
+/// Report, once per task, the privilege mode its syscalls arrive from.
+///
+/// `from_user` is true for `ecall` from U-mode (`mcause` 8).  This is the
+/// observable evidence — checked by the boot integration test — that tasks
+/// really execute in the mode they were declared with.
+pub fn note_syscall_mode(from_user: bool) {
+    let idx = current_task_idx();
+    if idx as usize >= 32 {
+        return;
+    }
+    // SAFETY: trap path, interrupts disabled, single hart.
+    unsafe {
+        let seen = core::ptr::addr_of_mut!(SYSCALL_SEEN);
+        if *seen & (1 << idx) != 0 {
+            return;
+        }
+        *seen |= 1 << idx;
+    }
+    crate::uart::uart_puts("[KERNEL] task ");
+    crate::uart::uart_print_usize(idx as usize);
+    crate::uart::uart_puts(if from_user { " running in U-mode\n" } else { " running in M-mode\n" });
 }
 
 /// Saved frame of the task selected by [`init`], for the first dispatch.
