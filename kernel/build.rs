@@ -3,10 +3,10 @@
 // Responsibilities:
 //   1. Linker script setup — add kernel/ to the linker search path so riscv-rt
 //      can find memory.x (which defines MEMORY regions for our target).
-//   2. OML code generation — invoke the OML transpiler on tasks/*.oml to
-//      regenerate kernel/src/generated/task_schema.rs.  The build continues
-//      without error if OML is not installed; the committed generated files
-//      are used instead.
+//   2. OML code generation — invoke the OML transpiler on tasks/task.oml and
+//      tasks/demo_tasks.oml to regenerate src/generated/task_schema.rs and
+//      src/generated/demo_tasks.rs.  The build continues without error if OML
+//      is not built; the committed generated files are used instead.
 //   3. CCG constant emission — parse src/generated/demo_tasks.rs, compute the
 //      Capability Contention Graph and MaxInheritedPriority on the host (with
 //      alloc), and write src/generated/ccg_constants.rs.  This eliminates all
@@ -14,9 +14,12 @@
 //
 // OML binary resolution order:
 //   1. OML_BIN env var (set by CI or developer)
-//   2. oml/target/release/oml (git submodule at repo root)
-//   3. ../../OML/target/release/oml (sibling repo, local development layout)
-//   4. oml on PATH
+//   2. oml/target/release/oml (git submodule at repo root; scripts/build_oml.sh)
+//
+// A sibling checkout or an `oml` on PATH is deliberately not used: an older
+// transpiler without instance support silently emits empty instance files,
+// which would overwrite the committed demo_tasks.rs.  The submodule pins the
+// exact OML revision this kernel is generated with.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -36,28 +39,40 @@ fn main() {
     println!("cargo:rerun-if-changed=memory.x");
 
     // --- OML code generation ------------------------------------------------
+    // Each .oml source maps to the file name the kernel imports.  The OML
+    // transpiler names its output after the input file stem, so it writes
+    // into OUT_DIR and the result is copied to its final name; files are only
+    // rewritten when their contents change, so an unchanged regeneration does
+    // not dirty the working tree or retrigger dependent builds.
     println!("cargo:rerun-if-changed=../tasks/");
     println!("cargo:rerun-if-env-changed=OML_BIN");
 
     let out_dir = manifest_dir.join("src/generated");
     std::fs::create_dir_all(&out_dir).expect("failed to create src/generated/");
 
+    const OML_SOURCES: [(&str, &str); 2] = [
+        ("task.oml", "task_schema.rs"),
+        ("demo_tasks.oml", "demo_tasks.rs"),
+    ];
+
     if let Some(oml_bin) = find_oml_binary(&manifest_dir) {
         let tasks_dir = manifest_dir.join("../tasks");
-        if tasks_dir.exists() {
-            let task_oml = tasks_dir.join("task.oml");
-            if task_oml.exists() {
-                let status = Command::new(&oml_bin)
-                    .args([
-                        task_oml.to_str().unwrap(),
-                        "--rust",
-                        "--output",
-                        out_dir.to_str().unwrap(),
-                    ])
-                    .status()
-                    .expect("failed to invoke OML transpiler");
-                assert!(status.success(), "OML transpiler returned non-zero exit code");
-            }
+        let scratch = PathBuf::from(env::var("OUT_DIR").unwrap()).join("oml");
+        std::fs::create_dir_all(&scratch).expect("failed to create OUT_DIR/oml");
+        for (source, target) in OML_SOURCES {
+            let input = tasks_dir.join(source);
+            let status = Command::new(&oml_bin)
+                .arg(&input)
+                .args(["--rust", "--output"])
+                .arg(&scratch)
+                .status()
+                .expect("failed to invoke OML transpiler");
+            assert!(status.success(), "OML transpiler failed on {}", source);
+
+            let stem = Path::new(source).file_stem().unwrap().to_string_lossy().into_owned();
+            let produced = std::fs::read_to_string(scratch.join(format!("{stem}.rs")))
+                .unwrap_or_else(|_| panic!("OML produced no output for {}", source));
+            write_if_changed(&out_dir.join(target), &produced);
         }
     } else {
         println!("cargo:warning=OML binary not found — using committed generated files.");
@@ -245,8 +260,7 @@ fn emit_ccg_constants(out_dir: &Path, mip: &[u8]) {
         entries = entries.join(", "),
     );
 
-    std::fs::write(out_dir.join("ccg_constants.rs"), content)
-        .expect("failed to write ccg_constants.rs");
+    write_if_changed(&out_dir.join("ccg_constants.rs"), &content);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,19 +278,19 @@ fn find_oml_binary(manifest_dir: &Path) -> Option<String> {
 
     // Git submodule at the repo root (oml/ relative to kernel/).
     let submodule = manifest_dir.join("../oml/target/release/oml");
+    println!("cargo:rerun-if-changed={}", submodule.display());
     if submodule.exists() {
         return Some(submodule.to_string_lossy().into_owned());
     }
 
-    // Sibling repository layout used during local development.
-    let sibling = manifest_dir.join("../../OML/target/release/oml");
-    if sibling.exists() {
-        return Some(sibling.to_string_lossy().into_owned());
-    }
-
-    if Command::new("oml").arg("--help").output().is_ok() {
-        return Some("oml".to_string());
-    }
-
     None
+}
+
+/// Write `contents` to `path` unless the file already holds exactly that.
+fn write_if_changed(path: &Path, contents: &str) {
+    if std::fs::read_to_string(path).is_ok_and(|current| current == contents) {
+        return;
+    }
+    std::fs::write(path, contents)
+        .unwrap_or_else(|e| panic!("failed to write {}: {}", path.display(), e));
 }
