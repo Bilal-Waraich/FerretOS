@@ -167,9 +167,12 @@ mod inner {
     // ---------------------------------------------------------------------------
 
     macro_rules! write_pmpaddr_impl {
-        ($n:literal, $csr:literal) => {
+        ($n:ident, $csr:literal) => {
             // SAFETY: caller guarantees M-mode boot path.
             unsafe fn $n(val: usize) {
+                #[cfg(not(target_arch = "riscv32"))]
+                let _ = val;
+                #[cfg(target_arch = "riscv32")]
                 core::arch::asm!(
                     concat!("csrw ", $csr, ", {v}"),
                     v = in(reg) val,
@@ -197,8 +200,11 @@ mod inner {
     write_pmpaddr_impl!(pmpaddr_15, "pmpaddr15");
 
     macro_rules! write_pmpcfg_impl {
-        ($n:literal, $csr:literal) => {
+        ($n:ident, $csr:literal) => {
             unsafe fn $n(val: usize) {
+                #[cfg(not(target_arch = "riscv32"))]
+                let _ = val;
+                #[cfg(target_arch = "riscv32")]
                 core::arch::asm!(
                     concat!("csrw ", $csr, ", {v}"),
                     v = in(reg) val,

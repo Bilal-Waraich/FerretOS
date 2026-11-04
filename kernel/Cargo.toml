@@ -18,7 +18,7 @@ path = "src/main.rs"
 # Supports up to 8 tasks (16 PMP entries, 2 per task).
 pmp = []
 
-[dependencies]
+[target.'cfg(target_arch = "riscv32")'.dependencies]
 # riscv-rt provides the low-level reset vector, stack pointer initialisation,
 # and the #[entry] macro that lets us write our kernel entry point in safe
 # Rust.  Version 0.12 is the first release that works cleanly with the

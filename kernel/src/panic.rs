@@ -4,7 +4,7 @@ use core::fmt;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
-use crate::uart;
+use ferret::uart;
 
 /// Zero-sized `fmt::Write` adapter that forwards every character to the UART.
 ///

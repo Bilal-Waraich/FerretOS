@@ -57,3 +57,12 @@ jobs:
       - name: Run Clippy
         run: |
           cargo clippy -- -D warnings
+          cargo clippy --features pmp -- -D warnings
+
+      # Unit tests are compiled for the host (the test harness cannot run on
+      # riscv32), so lint them there too.
+      - name: Run Clippy on host unit tests
+        run: |
+          HOST="$(rustc -vV | sed -n 's/^host: //p')"
+          cargo clippy -p ferret --lib --tests --target "$HOST" -- -D warnings
+          cargo clippy -p ferret --lib --tests --target "$HOST" --features pmp -- -D warnings

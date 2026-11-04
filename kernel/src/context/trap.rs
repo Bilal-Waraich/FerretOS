@@ -13,6 +13,7 @@
 //! whatsoever, which is what we need for a trap entry that runs before any
 //! register has been touched.
 
+#[cfg(target_arch = "riscv32")]
 use core::arch::global_asm;
 
 use super::TrapFrame;
@@ -24,6 +25,7 @@ use crate::uart;
 // mstatus: 0x84
 // mcause:  0x88
 // mtval:   0x8C
+#[cfg(target_arch = "riscv32")]
 global_asm!(
     // Place this code in the .trap section so the linker script's
     // KEEP(*(.trap)) directive keeps it and the linker knows to use

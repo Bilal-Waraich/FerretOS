@@ -1,0 +1,43 @@
+name: Unit Tests
+
+# Runs the kernel library's #[cfg(test)] modules on the host.  The kernel is
+# no_std and targets riscv32imac, where the Rust test harness cannot run, so
+# scripts/host_test.sh overrides the target with the runner's host triple.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  host-tests:
+    name: Host unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2024-12-01
+          targets: riscv32imac-unknown-none-elf
+          components: rust-src
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: v1-host-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            v1-host-test-
+
+      - name: Run unit tests (default and pmp feature sets)
+        run: bash scripts/host_test.sh
