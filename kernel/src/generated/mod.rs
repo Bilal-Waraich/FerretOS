@@ -1,6 +1,7 @@
 //! OML-generated task schema, instance bindings, and precomputed CCG constants.
 //!
-//! `task_schema.rs` and `demo_tasks.rs` are raw OML transpiler output, and
+//! `task_schema.rs`, `demo_tasks.rs` and `pipeline_tasks.rs` are raw OML
+//! transpiler output, and
 //! `ccg_constants.rs` is emitted by `build.rs`; all three are regenerated on
 //! every build where OML is available and committed so the kernel builds
 //! without it.  `bridge` is hand-written and never overwritten.
@@ -19,9 +20,16 @@ pub mod task_schema {
     include!("task_schema.rs");
 }
 
-/// Demo task instances generated from `tasks/demo_tasks.oml`.
+/// CA-PIP H/M/L demo instances generated from `tasks/demo_tasks.oml`.
 #[allow(dead_code, clippy::empty_line_after_outer_attr)]
 pub mod demo_tasks {
     use super::task_schema::TaskConfig;
     include!("demo_tasks.rs");
+}
+
+/// Sensor-fusion pipeline instances generated from `tasks/pipeline_tasks.oml`.
+#[allow(dead_code, clippy::empty_line_after_outer_attr)]
+pub mod pipeline_tasks {
+    use super::task_schema::TaskConfig;
+    include!("pipeline_tasks.rs");
 }

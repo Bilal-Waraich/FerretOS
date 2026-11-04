@@ -21,6 +21,9 @@ pmp = []
 # PMP violation integration test (tests/integration/pmp_fault_test.sh).
 # With `pmp` the write must trap; without it, the write succeeds.
 fault-demo = []
+# Run the CA-PIP H/M/L demo (tasks/demo_tasks.oml) instead of the default
+# sensor-fusion pipeline (tasks/pipeline_tasks.oml).
+demo-hml = []
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 # riscv-rt provides the low-level reset vector, stack pointer initialisation,

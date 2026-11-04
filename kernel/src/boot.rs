@@ -4,7 +4,6 @@
 
 use crate::demo;
 use ferret::context::{boot_trap_stack_top, trap};
-use ferret::generated::demo_tasks::{TASK_H, TASK_L, TASK_M};
 use ferret::memory::task::{register_task, TaskDescriptor, TaskMode};
 use ferret::{capability, clint, memory, scheduler, uart};
 use riscv_rt::entry;
@@ -16,27 +15,23 @@ const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const IDLE_PRIORITY: u8 = 0;
 
 // ---------------------------------------------------------------------------
-// Compile-time overlap check for the three CA-PIP demo task memory regions.
+// Compile-time overlap check for the TASKRAM task regions (slots 0–3; both
+// demos use slots 0–2, the fault-demo task slot 3).
 // ---------------------------------------------------------------------------
 const _: () = memory::assert_no_overlap::<
-    0x800B_8000, 0x800B_9000,   // task L: 4 KB
-    0x800B_9000, 0x800B_A000,   // task M: 4 KB
+    0x800B_8000, 0x800B_9000,   // slot 0: 4 KB
+    0x800B_9000, 0x800B_A000,   // slot 1: 4 KB
 >();
 const _: () = memory::assert_no_overlap::<
-    0x800B_9000, 0x800B_A000,   // task M: 4 KB
-    0x800B_A000, 0x800B_B000,   // task H: 4 KB
+    0x800B_9000, 0x800B_A000,   // slot 1: 4 KB
+    0x800B_A000, 0x800B_B000,   // slot 2: 4 KB
+>();
+const _: () = memory::assert_no_overlap::<
+    0x800B_A000, 0x800B_B000,   // slot 2: 4 KB
+    0x800B_B000, 0x800B_C000,   // slot 3: 4 KB
 >();
 
-// Task stacks.  Each fills its task's 4 KB memory region in TASKRAM: the
-// linker places `.task_ram.<slot>` sections in slot order (kernel/memory.x),
-// and `check_region_placement` verifies at boot that this matches the OML
-// declarations.  The sections are NOLOAD, so canaries are written at boot.
-#[link_section = ".task_ram.0"]
-static mut STACK_TASK_L: memory::Stack<4096> = memory::Stack::new();
-#[link_section = ".task_ram.1"]
-static mut STACK_TASK_M: memory::Stack<4096> = memory::Stack::new();
-#[link_section = ".task_ram.2"]
-static mut STACK_TASK_H: memory::Stack<4096> = memory::Stack::new();
+// Demo task stacks live with their task sets in `demo::{hml, pipeline}`.
 // Region for the fault-demo rogue task: TASKRAM slot 3.
 #[cfg(feature = "fault-demo")]
 #[link_section = ".task_ram.3"]
@@ -75,7 +70,8 @@ fn check_region_placement() {
 
 /// Boot entry point — called by riscv-rt after BSS zero-init and `.data` copy.
 ///
-/// Registers the demo tasks and the idle task, validates capabilities,
+/// Registers the selected demo task set and the idle task, validates
+/// capabilities and channel endpoints,
 /// prepares each task's initial frame, arms the timer, and starts the
 /// highest-priority task.  Never returns: the boot stack is abandoned once
 /// the first task runs.
@@ -95,48 +91,34 @@ fn kernel_main() -> ! {
 
     // --- Task registration --------------------------------------------------
     // Interrupts are not yet enabled; this is the safe single-threaded boot
-    // window for populating TASK_REGISTRY.  Registration order must match
-    // the slot order of MAX_INHERITED_PRIORITIES (L, M, H); the idle task is
-    // registered last and has no capabilities, so its MIP slot is 0.
-    //
-    // addr_of! gives the base address of each stack buffer without creating a
-    // Rust reference to the mutable static.
-    let stack_l = core::ptr::addr_of!(STACK_TASK_L) as usize;
-    let stack_m = core::ptr::addr_of!(STACK_TASK_M) as usize;
-    let stack_h = core::ptr::addr_of!(STACK_TASK_H) as usize;
-    let stack_idle = core::ptr::addr_of!(STACK_IDLE) as usize;
+    // window for populating TASK_REGISTRY.  The selected task set registers
+    // its tasks in slot order and returns the matching build-time MIP table.
+    // Kernel-owned tasks are registered after it; they hold no capabilities,
+    // so their MIP slots are 0.
+    #[cfg(feature = "demo-hml")]
+    let mip_table = demo::hml::register();
+    #[cfg(not(feature = "demo-hml"))]
+    let mip_table = demo::pipeline::register();
 
-    register_task(TASK_L.into_descriptor(0, stack_l, demo::task_l));
-    register_task(TASK_M.into_descriptor(1, stack_m, demo::task_m));
-    register_task(TASK_H.into_descriptor(2, stack_h, demo::task_h));
-    // The fault-demo rogue task is not part of the OML task set, so it gets
-    // no MIP slot of its own and runs at its base priority.
+    // The fault-demo rogue task is not part of the OML task set and runs at
+    // its base priority.
     #[cfg(feature = "fault-demo")]
-    {
-        let stack_rogue = core::ptr::addr_of!(STACK_ROGUE) as usize;
-        // SAFETY: boot path; base of an unused Stack<4096> in a NOLOAD section.
-        unsafe { memory::stack::write_canary(stack_rogue) };
-        register_task(
-            TaskDescriptor::with_capabilities(
-                3, 1, stack_rogue, 4096, 0x800B_B000, 0x800B_C000,
-                0, capability::CONSOLE_CAP_BIT, 0,
-            )
-            .with_entry(demo::task_rogue as usize),
-        );
-    }
+    register_task(
+        TaskDescriptor::with_capabilities(
+            memory::task_count() as u8, 1,
+            demo::claim_stack(core::ptr::addr_of!(STACK_ROGUE) as usize), 4096,
+            0x800B_B000, 0x800B_C000,
+            0, capability::CONSOLE_CAP_BIT, 0,
+        )
+        .with_entry(demo::task_rogue as usize),
+    );
+    let stack_idle = core::ptr::addr_of!(STACK_IDLE) as usize;
     register_task(
         TaskDescriptor::new(memory::task_count() as u8, IDLE_PRIORITY, stack_idle, memory::Stack::<1024>::size(), 0, 0)
             .with_entry(demo::idle as usize)
             .with_mode(TaskMode::Machine),
     );
 
-    // SAFETY: boot path, no task running; each address is the base of a
-    // Stack<N> in a NOLOAD section that no one has used yet.
-    unsafe {
-        memory::stack::write_canary(stack_l);
-        memory::stack::write_canary(stack_m);
-        memory::stack::write_canary(stack_h);
-    }
     check_region_placement();
 
     uart::uart_puts("Tasks registered: ");
@@ -164,7 +146,7 @@ fn kernel_main() -> ! {
     // each task's first trap frame on its kernel stack.  OML tasks run in
     // U-mode; the idle task runs in M-mode.  MPIE makes interrupts come on
     // with the first mret.
-    scheduler::init();
+    scheduler::init(mip_table);
     let gp: usize;
     // SAFETY: reading gp has no side effects.  Tasks are linked into the
     // kernel image, so they must run with the kernel's global pointer.

@@ -2,9 +2,9 @@
 //!
 //! # Architecture
 //!
-//! 1. **Build-time CCG + MIP** — `build.rs` parses `src/generated/demo_tasks.rs`,
-//!    constructs the CCG, and runs BFS (with alloc, on the host) to produce
-//!    `src/generated/ccg_constants.rs`.  Zero graph traversal happens at boot.
+//! 1. **Build-time CCG + MIP** — `build.rs` parses each task set in
+//!    `src/generated/`, constructs the CCG, and runs BFS (with alloc, on the
+//!    host) to produce `src/generated/ccg_constants.rs`.  Zero graph traversal happens at boot.
 //! 2. **MIP write** (`write_precomputed_mip`) — O(N) copy from the const array
 //!    into each `TaskDescriptor.max_inherited_priority`.
 //! 3. **Ready queue** (`queue.rs`) — static max-heap keyed by `effective_priority`.
@@ -41,7 +41,6 @@ mod ipc_tests;
 
 use crate::config::MAX_TASKS;
 use crate::context::TrapFrame;
-use crate::generated::ccg_constants::MAX_INHERITED_PRIORITIES;
 use crate::memory::task::{task_count, task_registry_ptr, BlockReason, TaskDescriptor, TaskMode, TaskState};
 use queue::PriorityQueue;
 
@@ -167,11 +166,11 @@ fn task_ptr(idx: u8) -> *mut TaskDescriptor {
 
 /// Write precomputed MIP values from `ccg_constants` into the task registry.
 ///
-/// build.rs parsed demo_tasks.rs, built the CCG, and ran BFS on the host
-/// (with alloc) to populate `MAX_INHERITED_PRIORITIES`.  This call simply
-/// copies those values — O(N) writes, zero graph traversal at boot.
-fn write_precomputed_mip() {
-    for (i, &mip) in MAX_INHERITED_PRIORITIES.iter().enumerate().take(task_count()) {
+/// build.rs parsed the task set, built the CCG, and ran BFS on the host
+/// (with alloc) to produce `mip_table`.  This call simply copies those
+/// values — O(N) writes, zero graph traversal at boot.
+fn write_precomputed_mip(mip_table: &[u8; MAX_TASKS]) {
+    for (i, &mip) in mip_table.iter().enumerate().take(task_count()) {
         let t = task_ptr(i as u8);
         if !t.is_null() {
             // SAFETY: single-threaded boot path; `t` points into the registry.
@@ -182,7 +181,10 @@ fn write_precomputed_mip() {
 
 /// Initialise the scheduler subsystem.
 ///
-/// 1. Writes precomputed MIP into every `TaskDescriptor` (from build.rs constants).
+/// `mip_table` is the build-time `MaxInheritedPriority` array for the task
+/// set that was registered (one of the arrays in `generated::ccg_constants`).
+///
+/// 1. Writes precomputed MIP into every `TaskDescriptor`.
 /// 2. Enqueues all `Ready` tasks into the ready queue.
 /// 3. Selects the highest-priority task as the first to run.
 ///
@@ -190,8 +192,8 @@ fn write_precomputed_mip() {
 ///
 /// Must be called after all tasks are registered and before interrupts are
 /// enabled (single-threaded boot path).
-pub fn init() {
-    write_precomputed_mip();
+pub fn init(mip_table: &[u8; MAX_TASKS]) {
+    write_precomputed_mip(mip_table);
     populate_ready_queue();
 }
 
