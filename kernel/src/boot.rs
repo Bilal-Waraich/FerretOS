@@ -37,6 +37,11 @@ static mut STACK_TASK_L: memory::Stack<4096> = memory::Stack::new();
 static mut STACK_TASK_M: memory::Stack<4096> = memory::Stack::new();
 #[link_section = ".task_ram.2"]
 static mut STACK_TASK_H: memory::Stack<4096> = memory::Stack::new();
+// Region for the fault-demo rogue task: TASKRAM slot 3.
+#[cfg(feature = "fault-demo")]
+#[link_section = ".task_ram.3"]
+static mut STACK_ROGUE: memory::Stack<4096> = memory::Stack::new();
+
 // The idle task runs in M-mode and is not PMP-constrained; its stack stays
 // in kernel RAM.
 static mut STACK_IDLE: memory::Stack<1024> = memory::Stack::new();
@@ -104,8 +109,23 @@ fn kernel_main() -> ! {
     register_task(TASK_L.into_descriptor(0, stack_l, demo::task_l));
     register_task(TASK_M.into_descriptor(1, stack_m, demo::task_m));
     register_task(TASK_H.into_descriptor(2, stack_h, demo::task_h));
+    // The fault-demo rogue task is not part of the OML task set, so it gets
+    // no MIP slot of its own and runs at its base priority.
+    #[cfg(feature = "fault-demo")]
+    {
+        let stack_rogue = core::ptr::addr_of!(STACK_ROGUE) as usize;
+        // SAFETY: boot path; base of an unused Stack<4096> in a NOLOAD section.
+        unsafe { memory::stack::write_canary(stack_rogue) };
+        register_task(
+            TaskDescriptor::with_capabilities(
+                3, 1, stack_rogue, 4096, 0x800B_B000, 0x800B_C000,
+                0, capability::CONSOLE_CAP_BIT, 0,
+            )
+            .with_entry(demo::task_rogue as usize),
+        );
+    }
     register_task(
-        TaskDescriptor::new(3, IDLE_PRIORITY, stack_idle, memory::Stack::<1024>::size(), 0, 0)
+        TaskDescriptor::new(memory::task_count() as u8, IDLE_PRIORITY, stack_idle, memory::Stack::<1024>::size(), 0, 0)
             .with_entry(demo::idle as usize)
             .with_mode(TaskMode::Machine),
     );

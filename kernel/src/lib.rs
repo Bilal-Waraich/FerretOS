@@ -29,6 +29,13 @@ mod ccg_gen;
 pub mod sys;
 pub mod syscall;
 
+/// Kernel-owned word that the `fault-demo` task tries to overwrite.
+///
+/// It lives in kernel `.bss`, outside every task region.  With PMP isolation
+/// the store traps; without it the store lands and the task reports that.
+#[cfg(feature = "fault-demo")]
+pub static mut FAULT_PROBE_TARGET: u32 = 0;
+
 /// Halt the hart permanently after a fatal error.
 ///
 /// Used by boot-time and runtime fatal paths (CLAUDE.md §6.5) once the

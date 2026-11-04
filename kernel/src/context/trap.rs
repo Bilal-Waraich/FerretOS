@@ -220,12 +220,35 @@ pub unsafe extern "C" fn trap_handler(frame: *mut TrapFrame) -> *mut TrapFrame {
     }
 }
 
+/// Human-readable name of a synchronous exception cause.
+pub fn exception_name(code: usize) -> &'static str {
+    match code {
+        0 => "instruction address misaligned",
+        1 => "instruction access fault",
+        2 => "illegal instruction",
+        3 => "breakpoint",
+        4 => "load address misaligned",
+        5 => "load access fault",
+        6 => "store address misaligned",
+        7 => "store access fault",
+        _ => "exception",
+    }
+}
+
 /// Print a fault record for an unexpected exception and halt.
 ///
 /// Per CLAUDE.md §6.5 a runtime hardware fault is not recoverable: the
-/// faulting task is never resumed.
+/// faulting task is never resumed.  Access faults (1, 5, 7) taken from
+/// U-mode are what PMP raises when a task touches memory outside its region.
 fn fault_and_halt(f: &TrapFrame) -> ! {
-    uart::uart_puts("[FAULT] exception mcause=");
+    let code = f.mcause & !(1 << 31);
+    let from_user = (f.mstatus >> 11) & 0b11 == 0;
+    uart::uart_puts("[FAULT] ");
+    uart::uart_puts(exception_name(code));
+    if from_user && matches!(code, 1 | 5 | 7) {
+        uart::uart_puts(" (PMP violation)");
+    }
+    uart::uart_puts(" mcause=");
     uart::uart_print_hex(f.mcause);
     uart::uart_puts(" mepc=");
     uart::uart_print_hex(f.mepc);
@@ -233,6 +256,20 @@ fn fault_and_halt(f: &TrapFrame) -> ! {
     uart::uart_print_hex(f.mtval);
     uart::uart_puts(" task=");
     uart::uart_print_usize(crate::scheduler::current_task_idx() as usize);
+    uart::uart_puts(if from_user { " mode=U" } else { " mode=M" });
     uart::uart_puts("\nSystem halted.\n");
     crate::halt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exception_name;
+
+    #[test]
+    fn access_faults_are_named() {
+        assert_eq!(exception_name(1), "instruction access fault");
+        assert_eq!(exception_name(5), "load access fault");
+        assert_eq!(exception_name(7), "store access fault");
+        assert_eq!(exception_name(99), "exception");
+    }
 }
