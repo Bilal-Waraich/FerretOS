@@ -12,8 +12,14 @@
  *   QEMU places DRAM starting at 0x80000000.  We split it into two logical
  *   regions to simulate a typical embedded layout:
  *
- *   FLASH (0x80000000, 512 KB) — code and read-only data (execute-in-place).
- *   RAM   (0x80080000, 256 KB) — mutable data, BSS, heap placeholder, stack.
+ *   FLASH   (0x80000000, 512 KB) — code and read-only data (execute-in-place).
+ *   RAM     (0x80080000, 224 KB) — kernel data, BSS, heap placeholder, boot stack.
+ *   TASKRAM (0x800B8000,  32 KB) — task memory regions (one per task, each
+ *                                  holding that task's stack).  Kept apart from
+ *                                  kernel RAM so a PMP entry covering a task
+ *                                  region can never expose kernel data.
+ *
+ *   RAM + TASKRAM = the 256 KB RAM budget.
  *
  * We then alias each REGION_* name to the appropriate physical region.
  * riscv-rt places .text and .rodata into REGION_TEXT / REGION_RODATA (both
@@ -26,7 +32,11 @@ MEMORY
     FLASH (rx)  : ORIGIN = 0x80000000, LENGTH = 512K
 
     /* rwx = readable + writable + executable */
-    RAM   (rwx) : ORIGIN = 0x80080000, LENGTH = 256K
+    RAM   (rwx) : ORIGIN = 0x80080000, LENGTH = 224K
+
+    /* Task memory regions.  Addresses must match tasks/demo_tasks.oml; the
+       boot code halts with a diagnostic if they do not. */
+    TASKRAM (rw) : ORIGIN = 0x800B8000, LENGTH = 32K
 }
 
 /*
@@ -56,3 +66,18 @@ SECTIONS
 {
     /DISCARD/ : { *(.eh_frame) *(.eh_frame_hdr) }
 }
+
+/*
+ * Task regions.  Each task's stack is placed in a section named
+ * .task_ram.<slot>; sorting by name lays them out in slot order, and each is
+ * 4 KB aligned so it can be covered by a single NAPOT PMP entry.  NOLOAD: the
+ * contents are not stored in flash (stack canaries are written at boot).
+ */
+SECTIONS
+{
+    .task_ram (NOLOAD) : ALIGN(4096)
+    {
+        KEEP(*(SORT_BY_NAME(.task_ram.*)))
+    } > TASKRAM
+}
+INSERT AFTER .bss;

@@ -95,6 +95,7 @@ TEXT_SIZE=$(get_section_size ".text")
 RODATA_SIZE=$(get_section_size ".rodata")
 DATA_SIZE=$(get_section_size ".data")
 BSS_SIZE=$(get_section_size ".bss")
+TASK_RAM_SIZE=$(get_section_size ".task_ram")
 
 # If sysv mode didn't work (some older size tools default to BSD mode),
 # try to parse the simpler BSD output: text   data    bss     dec     hex
@@ -106,7 +107,7 @@ if [[ "$TEXT_SIZE" -eq 0 && "$RODATA_SIZE" -eq 0 && "$DATA_SIZE" -eq 0 && "$BSS_
     RODATA_SIZE=0  # BSD format folds rodata into text
 fi
 
-for v in "$TEXT_SIZE" "$RODATA_SIZE" "$DATA_SIZE" "$BSS_SIZE"; do
+for v in "$TEXT_SIZE" "$RODATA_SIZE" "$DATA_SIZE" "$BSS_SIZE" "$TASK_RAM_SIZE"; do
     if ! [[ "$v" =~ ^[0-9]+$ ]]; then
         echo "ERROR: could not parse section sizes from '$SIZE_CMD' output." >&2
         echo "       Put rustc on PATH so the toolchain's llvm-size is found." >&2
@@ -117,7 +118,8 @@ done
 # .data occupies RAM at run time *and* flash at rest: its initial values are
 # stored in flash and copied to RAM by the reset code.
 FLASH_USED=$(( TEXT_SIZE + RODATA_SIZE + DATA_SIZE ))
-RAM_USED=$(( DATA_SIZE + BSS_SIZE ))
+# .task_ram holds the task memory regions (NOLOAD, in TASKRAM).
+RAM_USED=$(( DATA_SIZE + BSS_SIZE + TASK_RAM_SIZE ))
 
 # ---------------------------------------------------------------------------
 # Print the report
@@ -167,6 +169,7 @@ printf "  %-10s %8s bytes\n" ".text"   "$TEXT_SIZE"
 printf "  %-10s %8s bytes\n" ".rodata" "$RODATA_SIZE"
 printf "  %-10s %8s bytes\n" ".data"   "$DATA_SIZE"
 printf "  %-10s %8s bytes\n" ".bss"    "$BSS_SIZE"
+printf "  %-10s %8s bytes\n" ".task_ram" "$TASK_RAM_SIZE"
 echo "------------------------------------------"
 bar_line "Flash" "$FLASH_USED" "$FLASH_BUDGET"
 bar_line "RAM"   "$RAM_USED"   "$RAM_BUDGET"

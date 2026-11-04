@@ -101,3 +101,10 @@ jobs:
           rustup component add llvm-tools 2>/dev/null || true
 
           bash scripts/size_report.sh
+
+      # 8. Rebuild with per-task PMP isolation and run the same boot test:
+      #    the demo must behave identically with hardware isolation enabled.
+      - name: Boot integration test (feature pmp)
+        run: |
+          cargo build --release --features pmp
+          bash tests/integration/boot_test.sh
