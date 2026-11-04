@@ -3,11 +3,10 @@
 // Responsibilities:
 //   1. Linker script setup — add kernel/ to the linker search path so riscv-rt
 //      can find memory.x (which defines MEMORY regions for our target).
-//   2. OML code generation — invoke the OML transpiler on tasks/task.oml and
-//      tasks/demo_tasks.oml to regenerate src/generated/task_schema.rs and
-//      src/generated/demo_tasks.rs.  The build continues without error if OML
+//   2. OML code generation — invoke the OML transpiler on tasks/*.oml to
+//      regenerate src/generated/{task_schema,demo_tasks,pipeline_tasks}.rs.  The build continues without error if OML
 //      is not built; the committed generated files are used instead.
-//   3. CCG constant emission — parse src/generated/demo_tasks.rs, compute the
+//   3. CCG constant emission — parse each task set in src/generated/, compute the
 //      Capability Contention Graph and MaxInheritedPriority on the host (with
 //      alloc, via build/ccg_gen.rs), and write src/generated/ccg_constants.rs.
 //      This eliminates all boot-time graph traversal from the kernel binary.
@@ -53,9 +52,10 @@ fn main() {
     let out_dir = manifest_dir.join("src/generated");
     std::fs::create_dir_all(&out_dir).expect("failed to create src/generated/");
 
-    const OML_SOURCES: [(&str, &str); 2] = [
+    const OML_SOURCES: [(&str, &str); 3] = [
         ("task.oml", "task_schema.rs"),
         ("demo_tasks.oml", "demo_tasks.rs"),
+        ("pipeline_tasks.oml", "pipeline_tasks.rs"),
     ];
 
     if let Some(oml_bin) = find_oml_binary(&manifest_dir) {
@@ -82,34 +82,38 @@ fn main() {
     }
 
     // --- CCG constant emission (closes #42) ---------------------------------
-    // Always regenerate ccg_constants.rs from the committed demo_tasks.rs so
-    // the kernel never has to run CCG construction or MIP BFS at boot.  The
+    // Always regenerate ccg_constants.rs from the committed task sets so the
+    // kernel never has to run CCG construction or MIP BFS at boot.  The
     // algorithm lives in build/ccg_gen.rs, which the kernel's host unit tests
     // also compile, so the generator is tested like any other kernel code.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build/ccg_gen.rs");
-    println!("cargo:rerun-if-changed=src/generated/demo_tasks.rs");
 
-    let demo_tasks_path = out_dir.join("demo_tasks.rs");
-    if demo_tasks_path.exists() {
-        let src = std::fs::read_to_string(&demo_tasks_path)
-            .expect("failed to read demo_tasks.rs");
+    let mut mips: Vec<Vec<u8>> = Vec::new();
+    for (source, _) in ccg_gen::TASK_SETS {
+        let path = out_dir.join(source);
+        println!("cargo:rerun-if-changed=src/generated/{source}");
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("failed to read src/generated/{source}"));
         let tasks = ccg_gen::parse_task_configs(&src);
-        if !tasks.is_empty() {
-            let mip = ccg_gen::compute_mip(&tasks);
-            for (from, to) in ccg_gen::find_cycle_back_edges(&tasks) {
-                println!(
-                    "cargo:warning=CCG cycle detected: task {} → task {} → ... \
-                     Mutual block — check capability declarations in tasks/demo_tasks.oml.",
-                    from, to
-                );
-            }
-            write_if_changed(
-                &out_dir.join("ccg_constants.rs"),
-                &ccg_gen::render_ccg_constants(&mip, MAX_TASKS),
+        for (from, to) in ccg_gen::find_cycle_back_edges(&tasks) {
+            println!(
+                "cargo:warning=CCG cycle detected in {}: task {} → task {} → ... \
+                 Mutual block — check capability declarations in tasks/*.oml.",
+                source, from, to
             );
         }
+        mips.push(ccg_gen::compute_mip(&tasks));
     }
+    let tables: Vec<ccg_gen::MipTable<'_>> = ccg_gen::TASK_SETS
+        .iter()
+        .zip(&mips)
+        .map(|(&(source, const_name), mip)| ccg_gen::MipTable { const_name, source, mip })
+        .collect();
+    write_if_changed(
+        &out_dir.join("ccg_constants.rs"),
+        &ccg_gen::render_ccg_constants(&tables, MAX_TASKS),
+    );
 }
 
 // ---------------------------------------------------------------------------

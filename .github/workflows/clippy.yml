@@ -59,6 +59,7 @@ jobs:
           cargo clippy -- -D warnings
           cargo clippy --features pmp -- -D warnings
           cargo clippy --features pmp,fault-demo -- -D warnings
+          cargo clippy --features demo-hml -- -D warnings
 
       # Unit tests are compiled for the host (the test harness cannot run on
       # riscv32), so lint them there too.
