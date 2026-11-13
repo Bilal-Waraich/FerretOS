@@ -63,52 +63,50 @@ def parse(log: str):
 
 
 def render(samples, flushes, start, end) -> str:
-    W, left, right = 900, 150, 30
+    W, left, right = 960, 150, 20
     plot_w = W - left - right
     x = lambda tick: left + (tick - start) * plot_w / (end - start)
-    rows = {"sensor": 70, "logger": 130}
-    row_h = 34
-    H = 272
+    rows = {"sensor": 20, "logger": 76}
+    row_h = 36
+    axis_y = rows["logger"] + row_h
+    H = axis_y + 92
 
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
-           'font-family="-apple-system, BlinkMacSystemFont, \'Segoe UI\', Helvetica, Arial, sans-serif">',
+           'font-family="Arial, Helvetica, sans-serif">',
            """<style>
-  .bg{fill:#ffffff} .fg{fill:#1f2328} .muted{fill:#59636e} .grid{stroke:#d1d9e0}
-  .rowbg{fill:#f6f8fa} .work{fill:#e8a33d} .flush{fill:#bc4c00} .ok{fill:#1a7f37} .late{fill:#cf222e}
-  .rel{stroke:#1a7f37}
+  .bg{fill:#ffffff} .fg{fill:#1a1a1a} .muted{fill:#666666} .grid{stroke:#e6e6e6} .axis{stroke:#808080}
+  .work{fill:#bfbfbf} .flush{fill:#808080} .ok{fill:#76b900} .late{fill:#e52020} .rel{stroke:#76b900}
   @media (prefers-color-scheme: dark){
-    .bg{fill:#0d1117} .fg{fill:#e6edf3} .muted{fill:#9198a1} .grid{stroke:#3d444d}
-    .rowbg{fill:#151b23} .work{fill:#d29922} .flush{fill:#f0883e} .ok{fill:#3fb950} .late{fill:#f85149}
-    .rel{stroke:#3fb950}
+    .bg{fill:#0d1117} .fg{fill:#ededed} .muted{fill:#a0a0a0} .grid{stroke:#21262d} .axis{stroke:#8b949e}
+    .work{fill:#444c56} .flush{fill:#768390}
   }
-  text{font-size:13px}
+  text{font-size:12px} .name{font-size:13px;font-weight:700} .sub{font-size:11px}
 </style>""",
-           f'<rect class="bg" width="{W}" height="{H}" rx="6"/>',
-           f'<text class="fg" x="20" y="28" font-size="15" font-weight="600">'
-           f'Sensor-fusion pipeline in QEMU — ticks {start}–{end} (1 tick = 1 ms)</text>']
+           f'<rect class="bg" width="{W}" height="{H}"/>']
 
-    for name, y in rows.items():
-        out.append(f'<rect class="rowbg" x="{left}" y="{y}" width="{plot_w}" height="{row_h}"/>')
-    out.append(f'<text class="fg" x="{left - 12}" y="{rows["sensor"] + 15}" text-anchor="end" font-weight="600">sensor_reader</text>')
-    out.append(f'<text class="muted" x="{left - 12}" y="{rows["sensor"] + 29}" text-anchor="end" font-size="12">priority 3</text>')
-    out.append(f'<text class="fg" x="{left - 12}" y="{rows["logger"] + 15}" text-anchor="end" font-weight="600">uart_logger</text>')
-    out.append(f'<text class="muted" x="{left - 12}" y="{rows["logger"] + 29}" text-anchor="end" font-size="12">priority 1</text>')
+    first = start - start % 10 + (10 if start % 10 else 0)
+    for tick in range(first, end + 1, 10):
+        out.append(f'<line class="grid" x1="{x(tick):.1f}" y1="{rows["sensor"]}" x2="{x(tick):.1f}" y2="{axis_y}" stroke-width="1"/>')
+        out.append(f'<line class="axis" x1="{x(tick):.1f}" y1="{axis_y}" x2="{x(tick):.1f}" y2="{axis_y + 5}" stroke-width="1"/>')
+        out.append(f'<text class="muted sub" x="{x(tick):.1f}" y="{axis_y + 19}" text-anchor="middle">{tick}</text>')
+    out.append(f'<line class="axis" x1="{left}" y1="{axis_y}" x2="{W - right}" y2="{axis_y}" stroke-width="1"/>')
+    out.append(f'<text class="muted sub" x="{left + plot_w / 2:.1f}" y="{axis_y + 38}" text-anchor="middle">time since boot (ms)</text>')
 
-    for tick in range(start - start % 10 + (10 if start % 10 else 0), end + 1, 10):
-        out.append(f'<line class="grid" x1="{x(tick):.1f}" y1="56" x2="{x(tick):.1f}" y2="{rows["logger"] + row_h + 6}" stroke-width="1"/>')
-        out.append(f'<text class="muted" x="{x(tick):.1f}" y="{rows["logger"] + row_h + 22}" text-anchor="middle" font-size="12">{tick}</text>')
+    for key, name, pri in (("sensor", "sensor_reader", "priority 3"), ("logger", "uart_logger", "priority 1")):
+        out.append(f'<text class="fg name" x="{left - 14}" y="{rows[key] + 16}" text-anchor="end">{name}</text>')
+        out.append(f'<text class="muted sub" x="{left - 14}" y="{rows[key] + 31}" text-anchor="end">{pri}</text>')
 
     clip = lambda a, b: (max(a, start), min(b, end))
-    ly = rows["logger"] + 5
+    ly = rows["logger"] + 6
+    bh = row_h - 12
     for s in samples:
         a, b = clip(s["t"] - LOGGER_WORK, s["t"])
         if a < b:
-            out.append(f'<rect class="work" x="{x(a):.1f}" y="{ly}" width="{x(b) - x(a):.1f}" height="{row_h - 10}" rx="2"/>')
+            out.append(f'<rect class="work" x="{x(a):.1f}" y="{ly}" width="{x(b) - x(a) - 1:.1f}" height="{bh}"/>')
     for fs, fe in flushes:
         a, b = clip(fs, fe)
         if a < b:
-            out.append(f'<rect class="flush" x="{x(a):.1f}" y="{ly}" width="{x(b) - x(a):.1f}" height="{row_h - 10}" rx="2"/>')
-            out.append(f'<text class="bg" x="{(x(a) + x(b)) / 2:.1f}" y="{ly + 17}" text-anchor="middle" font-size="12" font-weight="600">flush</text>')
+            out.append(f'<rect class="flush" x="{x(a):.1f}" y="{ly}" width="{x(b) - x(a):.1f}" height="{bh}"/>')
 
     inside = 0
     for s in samples:
@@ -116,22 +114,21 @@ def render(samples, flushes, start, end) -> str:
         if not start <= run <= end:
             continue
         cls = "ok" if s["latency"] <= 1 else "late"
-        out.append(f'<rect class="{cls}" x="{x(run) - 2:.1f}" y="{rows["sensor"] + 5}" width="5" height="{row_h - 10}" rx="1"/>')
+        out.append(f'<rect class="{cls}" x="{x(run) - 2:.1f}" y="{rows["sensor"] + 6}" width="4" height="{bh}"/>')
         if any(fs < s["release"] < fe for fs, fe in flushes):
             inside += 1
-            out.append(f'<line class="rel" x1="{x(run) + 0.5:.1f}" y1="{rows["sensor"] + row_h}" '
-                       f'x2="{x(run) + 0.5:.1f}" y2="{ly}" stroke-width="1.5" stroke-dasharray="3 3"/>')
+            out.append(f'<line class="rel" x1="{x(run):.1f}" y1="{rows["sensor"] + row_h - 6}" '
+                       f'x2="{x(run):.1f}" y2="{ly}" stroke-width="1.25" stroke-dasharray="3 3"/>')
 
-    ly2 = H - 42
-    legend = [("ok", "sensor run (latency ≤ 1 tick)"), ("work", "logger line (3 ticks)"),
-              ("flush", "logger flush (25 ticks)")]
+    ly2 = axis_y + 66
+    legend = [("ok", "sensor run"), ("work", "logger line (3 ms)"), ("flush", "logger flush (25 ms)")]
     lx = left
     for cls, label in legend:
-        out.append(f'<rect class="{cls}" x="{lx}" y="{ly2 - 11}" width="14" height="12" rx="2"/>')
-        out.append(f'<text class="muted" x="{lx + 20}" y="{ly2}" font-size="12">{label}</text>')
-        lx += 30 + len(label) * 6.6
-    out.append(f'<line class="rel" x1="{left + 7}" y1="{ly2 + 10}" x2="{left + 7}" y2="{ly2 + 24}" stroke-width="1.5" stroke-dasharray="3 3"/>')
-    out.append(f'<text class="muted" x="{left + 20}" y="{ly2 + 21}" font-size="12">sensor release that falls inside a flush: the sensor preempts the logger and still runs on time</text>')
+        out.append(f'<rect class="{cls}" x="{lx}" y="{ly2 - 10}" width="12" height="12"/>')
+        out.append(f'<text class="muted sub" x="{lx + 18}" y="{ly2}">{label}</text>')
+        lx += 36 + len(label) * 6
+    out.append(f'<line class="rel" x1="{lx + 6}" y1="{ly2 - 11}" x2="{lx + 6}" y2="{ly2 + 3}" stroke-width="1.25" stroke-dasharray="3 3"/>')
+    out.append(f'<text class="muted sub" x="{lx + 18}" y="{ly2}">sensor preempts a flush in progress</text>')
     out.append("</svg>")
     return "\n".join(out) + "\n", inside
 
