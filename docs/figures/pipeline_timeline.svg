@@ -1,80 +1,86 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 272" width="900" height="272" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 204" width="960" height="204" font-family="Arial, Helvetica, sans-serif">
 <style>
-  .bg{fill:#ffffff} .fg{fill:#1f2328} .muted{fill:#59636e} .grid{stroke:#d1d9e0}
-  .rowbg{fill:#f6f8fa} .work{fill:#e8a33d} .flush{fill:#bc4c00} .ok{fill:#1a7f37} .late{fill:#cf222e}
-  .rel{stroke:#1a7f37}
+  .bg{fill:#ffffff} .fg{fill:#1a1a1a} .muted{fill:#666666} .grid{stroke:#e6e6e6} .axis{stroke:#808080}
+  .work{fill:#bfbfbf} .flush{fill:#808080} .ok{fill:#76b900} .late{fill:#e52020} .rel{stroke:#76b900}
   @media (prefers-color-scheme: dark){
-    .bg{fill:#0d1117} .fg{fill:#e6edf3} .muted{fill:#9198a1} .grid{stroke:#3d444d}
-    .rowbg{fill:#151b23} .work{fill:#d29922} .flush{fill:#f0883e} .ok{fill:#3fb950} .late{fill:#f85149}
-    .rel{stroke:#3fb950}
+    .bg{fill:#0d1117} .fg{fill:#ededed} .muted{fill:#a0a0a0} .grid{stroke:#21262d} .axis{stroke:#8b949e}
+    .work{fill:#444c56} .flush{fill:#768390}
   }
-  text{font-size:13px}
+  text{font-size:12px} .name{font-size:13px;font-weight:700} .sub{font-size:11px}
 </style>
-<rect class="bg" width="900" height="272" rx="6"/>
-<text class="fg" x="20" y="28" font-size="15" font-weight="600">Sensor-fusion pipeline in QEMU — ticks 30–130 (1 tick = 1 ms)</text>
-<rect class="rowbg" x="150" y="70" width="720" height="34"/>
-<rect class="rowbg" x="150" y="130" width="720" height="34"/>
-<text class="fg" x="138" y="85" text-anchor="end" font-weight="600">sensor_reader</text>
-<text class="muted" x="138" y="99" text-anchor="end" font-size="12">priority 3</text>
-<text class="fg" x="138" y="145" text-anchor="end" font-weight="600">uart_logger</text>
-<text class="muted" x="138" y="159" text-anchor="end" font-size="12">priority 1</text>
-<line class="grid" x1="150.0" y1="56" x2="150.0" y2="170" stroke-width="1"/>
-<text class="muted" x="150.0" y="186" text-anchor="middle" font-size="12">30</text>
-<line class="grid" x1="222.0" y1="56" x2="222.0" y2="170" stroke-width="1"/>
-<text class="muted" x="222.0" y="186" text-anchor="middle" font-size="12">40</text>
-<line class="grid" x1="294.0" y1="56" x2="294.0" y2="170" stroke-width="1"/>
-<text class="muted" x="294.0" y="186" text-anchor="middle" font-size="12">50</text>
-<line class="grid" x1="366.0" y1="56" x2="366.0" y2="170" stroke-width="1"/>
-<text class="muted" x="366.0" y="186" text-anchor="middle" font-size="12">60</text>
-<line class="grid" x1="438.0" y1="56" x2="438.0" y2="170" stroke-width="1"/>
-<text class="muted" x="438.0" y="186" text-anchor="middle" font-size="12">70</text>
-<line class="grid" x1="510.0" y1="56" x2="510.0" y2="170" stroke-width="1"/>
-<text class="muted" x="510.0" y="186" text-anchor="middle" font-size="12">80</text>
-<line class="grid" x1="582.0" y1="56" x2="582.0" y2="170" stroke-width="1"/>
-<text class="muted" x="582.0" y="186" text-anchor="middle" font-size="12">90</text>
-<line class="grid" x1="654.0" y1="56" x2="654.0" y2="170" stroke-width="1"/>
-<text class="muted" x="654.0" y="186" text-anchor="middle" font-size="12">100</text>
-<line class="grid" x1="726.0" y1="56" x2="726.0" y2="170" stroke-width="1"/>
-<text class="muted" x="726.0" y="186" text-anchor="middle" font-size="12">110</text>
-<line class="grid" x1="798.0" y1="56" x2="798.0" y2="170" stroke-width="1"/>
-<text class="muted" x="798.0" y="186" text-anchor="middle" font-size="12">120</text>
-<line class="grid" x1="870.0" y1="56" x2="870.0" y2="170" stroke-width="1"/>
-<text class="muted" x="870.0" y="186" text-anchor="middle" font-size="12">130</text>
-<rect class="work" x="150.0" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="222.0" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="423.6" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="445.2" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="466.8" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="510.0" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="582.0" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="783.6" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="805.2" y="135" width="21.6" height="24" rx="2"/>
-<rect class="work" x="826.8" y="135" width="21.6" height="24" rx="2"/>
-<rect class="flush" x="243.6" y="135" width="180.0" height="24" rx="2"/>
-<text class="bg" x="333.6" y="152" text-anchor="middle" font-size="12" font-weight="600">flush</text>
-<rect class="flush" x="603.6" y="135" width="180.0" height="24" rx="2"/>
-<text class="bg" x="693.6" y="152" text-anchor="middle" font-size="12" font-weight="600">flush</text>
-<rect class="ok" x="148.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="220.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="292.0" y="75" width="5" height="24" rx="1"/>
-<line class="rel" x1="294.5" y1="104" x2="294.5" y2="135" stroke-width="1.5" stroke-dasharray="3 3"/>
-<rect class="ok" x="364.0" y="75" width="5" height="24" rx="1"/>
-<line class="rel" x1="366.5" y1="104" x2="366.5" y2="135" stroke-width="1.5" stroke-dasharray="3 3"/>
-<rect class="ok" x="436.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="508.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="580.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="652.0" y="75" width="5" height="24" rx="1"/>
-<line class="rel" x1="654.5" y1="104" x2="654.5" y2="135" stroke-width="1.5" stroke-dasharray="3 3"/>
-<rect class="ok" x="724.0" y="75" width="5" height="24" rx="1"/>
-<line class="rel" x1="726.5" y1="104" x2="726.5" y2="135" stroke-width="1.5" stroke-dasharray="3 3"/>
-<rect class="ok" x="796.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="868.0" y="75" width="5" height="24" rx="1"/>
-<rect class="ok" x="150" y="219" width="14" height="12" rx="2"/>
-<text class="muted" x="170" y="230" font-size="12">sensor run (latency ≤ 1 tick)</text>
-<rect class="work" x="371.4" y="219" width="14" height="12" rx="2"/>
-<text class="muted" x="391.4" y="230" font-size="12">logger line (3 ticks)</text>
-<rect class="flush" x="540.0" y="219" width="14" height="12" rx="2"/>
-<text class="muted" x="560.0" y="230" font-size="12">logger flush (25 ticks)</text>
-<line class="rel" x1="157" y1="240" x2="157" y2="254" stroke-width="1.5" stroke-dasharray="3 3"/>
-<text class="muted" x="170" y="251" font-size="12">sensor release that falls inside a flush: the sensor preempts the logger and still runs on time</text>
+<rect class="bg" width="960" height="204"/>
+<line class="grid" x1="150.0" y1="20" x2="150.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="150.0" y1="112" x2="150.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="150.0" y="131" text-anchor="middle">30</text>
+<line class="grid" x1="229.0" y1="20" x2="229.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="229.0" y1="112" x2="229.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="229.0" y="131" text-anchor="middle">40</text>
+<line class="grid" x1="308.0" y1="20" x2="308.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="308.0" y1="112" x2="308.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="308.0" y="131" text-anchor="middle">50</text>
+<line class="grid" x1="387.0" y1="20" x2="387.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="387.0" y1="112" x2="387.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="387.0" y="131" text-anchor="middle">60</text>
+<line class="grid" x1="466.0" y1="20" x2="466.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="466.0" y1="112" x2="466.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="466.0" y="131" text-anchor="middle">70</text>
+<line class="grid" x1="545.0" y1="20" x2="545.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="545.0" y1="112" x2="545.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="545.0" y="131" text-anchor="middle">80</text>
+<line class="grid" x1="624.0" y1="20" x2="624.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="624.0" y1="112" x2="624.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="624.0" y="131" text-anchor="middle">90</text>
+<line class="grid" x1="703.0" y1="20" x2="703.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="703.0" y1="112" x2="703.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="703.0" y="131" text-anchor="middle">100</text>
+<line class="grid" x1="782.0" y1="20" x2="782.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="782.0" y1="112" x2="782.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="782.0" y="131" text-anchor="middle">110</text>
+<line class="grid" x1="861.0" y1="20" x2="861.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="861.0" y1="112" x2="861.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="861.0" y="131" text-anchor="middle">120</text>
+<line class="grid" x1="940.0" y1="20" x2="940.0" y2="112" stroke-width="1"/>
+<line class="axis" x1="940.0" y1="112" x2="940.0" y2="117" stroke-width="1"/>
+<text class="muted sub" x="940.0" y="131" text-anchor="middle">130</text>
+<line class="axis" x1="150" y1="112" x2="940" y2="112" stroke-width="1"/>
+<text class="muted sub" x="545.0" y="150" text-anchor="middle">time since boot (ms)</text>
+<text class="fg name" x="136" y="36" text-anchor="end">sensor_reader</text>
+<text class="muted sub" x="136" y="51" text-anchor="end">priority 3</text>
+<text class="fg name" x="136" y="92" text-anchor="end">uart_logger</text>
+<text class="muted sub" x="136" y="107" text-anchor="end">priority 1</text>
+<rect class="work" x="150.0" y="82" width="22.7" height="24"/>
+<rect class="work" x="229.0" y="82" width="22.7" height="24"/>
+<rect class="work" x="450.2" y="82" width="22.7" height="24"/>
+<rect class="work" x="473.9" y="82" width="22.7" height="24"/>
+<rect class="work" x="497.6" y="82" width="22.7" height="24"/>
+<rect class="work" x="545.0" y="82" width="22.7" height="24"/>
+<rect class="work" x="624.0" y="82" width="22.7" height="24"/>
+<rect class="work" x="845.2" y="82" width="22.7" height="24"/>
+<rect class="work" x="868.9" y="82" width="22.7" height="24"/>
+<rect class="work" x="892.6" y="82" width="22.7" height="24"/>
+<rect class="flush" x="252.7" y="82" width="197.5" height="24"/>
+<rect class="flush" x="647.7" y="82" width="197.5" height="24"/>
+<rect class="ok" x="148.0" y="26" width="4" height="24"/>
+<rect class="ok" x="227.0" y="26" width="4" height="24"/>
+<rect class="ok" x="306.0" y="26" width="4" height="24"/>
+<line class="rel" x1="308.0" y1="50" x2="308.0" y2="82" stroke-width="1.25" stroke-dasharray="3 3"/>
+<rect class="ok" x="385.0" y="26" width="4" height="24"/>
+<line class="rel" x1="387.0" y1="50" x2="387.0" y2="82" stroke-width="1.25" stroke-dasharray="3 3"/>
+<rect class="ok" x="464.0" y="26" width="4" height="24"/>
+<rect class="ok" x="543.0" y="26" width="4" height="24"/>
+<rect class="ok" x="622.0" y="26" width="4" height="24"/>
+<rect class="ok" x="701.0" y="26" width="4" height="24"/>
+<line class="rel" x1="703.0" y1="50" x2="703.0" y2="82" stroke-width="1.25" stroke-dasharray="3 3"/>
+<rect class="ok" x="780.0" y="26" width="4" height="24"/>
+<line class="rel" x1="782.0" y1="50" x2="782.0" y2="82" stroke-width="1.25" stroke-dasharray="3 3"/>
+<rect class="ok" x="859.0" y="26" width="4" height="24"/>
+<rect class="ok" x="938.0" y="26" width="4" height="24"/>
+<rect class="ok" x="150" y="168" width="12" height="12"/>
+<text class="muted sub" x="168" y="178">sensor run</text>
+<rect class="work" x="246" y="168" width="12" height="12"/>
+<text class="muted sub" x="264" y="178">logger line (3 ms)</text>
+<rect class="flush" x="390" y="168" width="12" height="12"/>
+<text class="muted sub" x="408" y="178">logger flush (25 ms)</text>
+<line class="rel" x1="552" y1="167" x2="552" y2="181" stroke-width="1.25" stroke-dasharray="3 3"/>
+<text class="muted sub" x="564" y="178">sensor preempts a flush in progress</text>
 </svg>

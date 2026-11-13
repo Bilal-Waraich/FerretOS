@@ -1,146 +1,124 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" width="900" height="700"
-     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" width="960" height="500"
+     font-family="Arial, Helvetica, sans-serif">
 <style>
-  .bg{fill:#ffffff} .fg{fill:#1f2328} .muted{fill:#59636e} .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  .band{fill:#f6f8fa;stroke:#d1d9e0} .box{fill:#ffffff;stroke:#d1d9e0}
-  .build{fill:#ddf4ff;stroke:#0969da} .task{fill:#dafbe1;stroke:#1a7f37} .kern{fill:#fbefff;stroke:#8250df}
-  .hw{fill:#fff8c5;stroke:#9a6700} .pmp{fill:none;stroke:#cf222e} .pmptext{fill:#cf222e}
-  .arrow{stroke:#59636e;fill:none} .head{fill:#59636e}
+  .bg{fill:#ffffff} .fg{fill:#1a1a1a} .muted{fill:#666666} .rule{stroke:#d9d9d9}
+  .blk{fill:#f2f2f2;stroke:#bfbfbf} .hl{fill:#76b900;stroke:#76b900} .hltext{fill:#000000}
+  .region{fill:none;stroke:#76b900} .regiontext{fill:#4d7a00} .line{stroke:#808080;fill:none} .head{fill:#808080}
+  .hw{fill:#e6e6e6;stroke:#bfbfbf}
   @media (prefers-color-scheme: dark){
-    .bg{fill:#0d1117} .fg{fill:#e6edf3} .muted{fill:#9198a1}
-    .band{fill:#151b23;stroke:#3d444d} .box{fill:#0d1117;stroke:#3d444d}
-    .build{fill:#0c2d6b;stroke:#4493f8} .task{fill:#0f3d1e;stroke:#3fb950} .kern{fill:#2a1b4e;stroke:#ab7df8}
-    .hw{fill:#3b2e00;stroke:#d29922} .pmp{fill:none;stroke:#f85149} .pmptext{fill:#f85149}
-    .arrow{stroke:#9198a1} .head{fill:#9198a1}
+    .bg{fill:#0d1117} .fg{fill:#ededed} .muted{fill:#a0a0a0} .rule{stroke:#30363d}
+    .blk{fill:#1c2128;stroke:#444c56} .hw{fill:#22272e;stroke:#444c56}
+    .regiontext{fill:#76b900} .line{stroke:#8b949e} .head{fill:#8b949e}
   }
-  text{font-size:13px} .t{font-weight:600;font-size:14px} .s{font-size:12px} .h{font-size:12px;font-weight:600;letter-spacing:.06em}
+  text{font-size:12px} .name{font-size:13px;font-weight:700} .row{font-size:12px;font-weight:700;letter-spacing:.08em} .sub{font-size:11px}
 </style>
 <defs>
-  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
     <path class="head" d="M0,0 L10,5 L0,10 z"/>
   </marker>
 </defs>
-<rect class="bg" width="900" height="700" rx="8"/>
-<text class="fg" x="20" y="32" font-size="17" font-weight="600">FerretOS architecture</text>
-<text class="muted" x="20" y="52" font-size="12">One static image: tasks, priorities and memory layout are fixed at build time. No heap, no dynamic tasks.</text>
+<rect class="bg" width="960" height="500"/>
 
-<!-- ── Build time ─────────────────────────────────────────────── -->
-<rect class="band" x="20" y="68" width="860" height="128" rx="8" stroke-width="1"/>
-<text class="muted h" x="36" y="90">BUILD TIME · HOST</text>
+<!-- Row labels -->
+<text class="fg row" x="20" y="64">BUILD</text>
+<text class="muted sub" x="20" y="80">host</text>
+<text class="fg row" x="20" y="186">TASKS</text>
+<text class="muted sub" x="20" y="202">user mode</text>
+<text class="fg row" x="20" y="320">KERNEL</text>
+<text class="muted sub" x="20" y="336">machine mode</text>
+<text class="fg row" x="20" y="416">HARDWARE</text>
+<text class="muted sub" x="20" y="432">QEMU virt</text>
 
-<rect class="build" x="36" y="102" width="176" height="76" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="124" y="126" text-anchor="middle">Task declarations</text>
-<text class="fg s code" x="124" y="146" text-anchor="middle">tasks/*.oml</text>
-<text class="muted s" x="124" y="164" text-anchor="middle">priority · caps · channels</text>
+<!-- Build row -->
+<rect class="blk" x="170" y="40" width="170" height="56" rx="2"/>
+<text class="fg name" x="255" y="64" text-anchor="middle">Task declarations</text>
+<text class="muted sub" x="255" y="82" text-anchor="middle">tasks/*.oml</text>
+<rect class="blk" x="370" y="40" width="170" height="56" rx="2"/>
+<text class="fg name" x="455" y="64" text-anchor="middle">OML transpiler</text>
+<text class="muted sub" x="455" y="82" text-anchor="middle">Rust task statics</text>
+<rect class="hl" x="570" y="40" width="170" height="56" rx="2"/>
+<text class="hltext name" x="655" y="64" text-anchor="middle">Contention graph</text>
+<text class="hltext sub" x="655" y="82" text-anchor="middle">MaxInheritedPriority</text>
+<rect class="blk" x="770" y="40" width="170" height="56" rx="2"/>
+<text class="fg name" x="855" y="64" text-anchor="middle">Priority tables</text>
+<text class="muted sub" x="855" y="82" text-anchor="middle">linked into the image</text>
+<line class="line" x1="340" y1="68" x2="368" y2="68" stroke-width="1.25" marker-end="url(#a)"/>
+<line class="line" x1="540" y1="68" x2="568" y2="68" stroke-width="1.25" marker-end="url(#a)"/>
+<line class="line" x1="740" y1="68" x2="768" y2="68" stroke-width="1.25" marker-end="url(#a)"/>
 
-<rect class="build" x="252" y="102" width="176" height="76" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="340" y="126" text-anchor="middle">OML transpiler</text>
-<text class="fg s code" x="340" y="146" text-anchor="middle">oml/ (submodule)</text>
-<text class="muted s" x="340" y="164" text-anchor="middle">emits Rust statics</text>
+<line class="rule" x1="20" y1="118" x2="940" y2="118" stroke-width="1"/>
 
-<rect class="build" x="468" y="102" width="176" height="76" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="556" y="126" text-anchor="middle">CCG + MIP</text>
-<text class="fg s code" x="556" y="146" text-anchor="middle">build/ccg_gen.rs</text>
-<text class="muted s" x="556" y="164" text-anchor="middle">BFS over contention graph</text>
+<!-- Task row: each task inside its PMP region -->
+<rect class="region" x="170" y="136" width="243" height="104" rx="2" stroke-width="1.25"/>
+<text class="regiontext sub" x="180" y="151">PMP region · 4 KB</text>
+<rect class="blk" x="182" y="160" width="219" height="66" rx="2"/>
+<text class="fg name" x="291" y="187" text-anchor="middle">sensor_reader</text>
+<text class="muted sub" x="291" y="206" text-anchor="middle">priority 3 · 10 ms period</text>
 
-<rect class="build" x="684" y="102" width="180" height="76" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="774" y="126" text-anchor="middle">Generated code</text>
-<text class="fg s code" x="774" y="146" text-anchor="middle">src/generated/</text>
-<text class="muted s" x="774" y="164" text-anchor="middle">task configs · MIP tables</text>
+<rect class="region" x="433" y="136" width="243" height="104" rx="2" stroke-width="1.25"/>
+<text class="regiontext sub" x="443" y="151">PMP region · 4 KB</text>
+<rect class="blk" x="445" y="160" width="219" height="66" rx="2"/>
+<text class="fg name" x="554" y="187" text-anchor="middle">filter</text>
+<text class="muted sub" x="554" y="206" text-anchor="middle">priority 2 · moving average</text>
 
-<line class="arrow" x1="212" y1="140" x2="250" y2="140" stroke-width="1.5" marker-end="url(#a)"/>
-<line class="arrow" x1="428" y1="140" x2="466" y2="140" stroke-width="1.5" marker-end="url(#a)"/>
-<line class="arrow" x1="644" y1="140" x2="682" y2="140" stroke-width="1.5" marker-end="url(#a)"/>
+<rect class="region" x="696" y="136" width="243" height="104" rx="2" stroke-width="1.25"/>
+<text class="regiontext sub" x="706" y="151">PMP region · 4 KB</text>
+<rect class="blk" x="708" y="160" width="219" height="66" rx="2"/>
+<text class="fg name" x="817" y="187" text-anchor="middle">uart_logger</text>
+<text class="muted sub" x="817" y="206" text-anchor="middle">priority 1 · slow output</text>
 
-<line class="arrow" x1="774" y1="178" x2="774" y2="222" stroke-width="1.5" marker-end="url(#a)"/>
-<text class="muted s" x="764" y="210" text-anchor="end">compiled into ferret.elf</text>
+<!-- Privilege boundary -->
+<line class="line" x1="170" y1="262" x2="940" y2="262" stroke-width="1" stroke-dasharray="5 4"/>
+<text class="muted sub" x="940" y="256" text-anchor="end">privilege boundary (ecall, interrupts)</text>
 
-<!-- ── U-mode tasks ───────────────────────────────────────────── -->
-<rect class="band" x="20" y="226" width="860" height="168" rx="8" stroke-width="1"/>
-<text class="muted h" x="36" y="248">USER MODE · TASKS</text>
-<text class="pmptext s" x="864" y="248" text-anchor="end">dashed red = PMP region: the running task may read/write only its own 4 KB</text>
+<!-- Kernel row -->
+<rect class="blk" x="170" y="282" width="118" height="78" rx="2"/>
+<text class="fg name" x="229" y="314" text-anchor="middle">Trap entry</text>
+<text class="muted sub" x="229" y="332" text-anchor="middle">per-task</text>
+<text class="muted sub" x="229" y="346" text-anchor="middle">kernel stack</text>
 
-<rect class="pmp" x="36" y="260" width="264" height="114" rx="8" stroke-width="1.5" stroke-dasharray="6 4"/>
-<rect class="task" x="48" y="272" width="240" height="90" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="168" y="296" text-anchor="middle">sensor_reader</text>
-<text class="muted s" x="168" y="316" text-anchor="middle">priority 3 · every 10 ms</text>
-<text class="muted s" x="168" y="334" text-anchor="middle">holds UART1 (sensor) · sends ch 0</text>
-<text class="muted s code" x="168" y="352" text-anchor="middle">0x800B_8000</text>
+<rect class="blk" x="300" y="282" width="118" height="78" rx="2"/>
+<text class="fg name" x="359" y="314" text-anchor="middle">Syscalls</text>
+<text class="muted sub" x="359" y="332" text-anchor="middle">pointer</text>
+<text class="muted sub" x="359" y="346" text-anchor="middle">validation</text>
 
-<rect class="pmp" x="318" y="260" width="264" height="114" rx="8" stroke-width="1.5" stroke-dasharray="6 4"/>
-<rect class="task" x="330" y="272" width="240" height="90" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="450" y="296" text-anchor="middle">filter</text>
-<text class="muted s" x="450" y="316" text-anchor="middle">priority 2 · moving average</text>
-<text class="muted s" x="450" y="334" text-anchor="middle">receives ch 0 · sends ch 1</text>
-<text class="muted s code" x="450" y="352" text-anchor="middle">0x800B_9000</text>
+<rect class="blk" x="431" y="282" width="118" height="78" rx="2"/>
+<text class="fg name" x="490" y="314" text-anchor="middle">Channels</text>
+<text class="muted sub" x="490" y="332" text-anchor="middle">blocking,</text>
+<text class="muted sub" x="490" y="346" text-anchor="middle">one-to-one</text>
 
-<rect class="pmp" x="600" y="260" width="264" height="114" rx="8" stroke-width="1.5" stroke-dasharray="6 4"/>
-<rect class="task" x="612" y="272" width="240" height="90" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="732" y="296" text-anchor="middle">uart_logger</text>
-<text class="muted s" x="732" y="316" text-anchor="middle">priority 1 · slow, bursty output</text>
-<text class="muted s" x="732" y="334" text-anchor="middle">holds UART0 · receives ch 1</text>
-<text class="muted s code" x="732" y="352" text-anchor="middle">0x800B_A000</text>
+<rect class="hl" x="561" y="282" width="118" height="78" rx="2"/>
+<text class="hltext name" x="620" y="314" text-anchor="middle">CA-PIP</text>
+<text class="hltext sub" x="620" y="332" text-anchor="middle">fixed effective</text>
+<text class="hltext sub" x="620" y="346" text-anchor="middle">priorities</text>
 
-<!-- ecall arrows -->
-<line class="arrow" x1="168" y1="374" x2="168" y2="426" stroke-width="1.5" marker-end="url(#a)"/>
-<line class="arrow" x1="450" y1="374" x2="450" y2="426" stroke-width="1.5" marker-end="url(#a)"/>
-<line class="arrow" x1="732" y1="374" x2="732" y2="426" stroke-width="1.5" marker-end="url(#a)"/>
-<text class="muted s code" x="178" y="408">ecall</text>
-<text class="muted s code" x="460" y="408">ecall</text>
-<text class="muted s code" x="742" y="408">ecall</text>
+<rect class="hl" x="692" y="282" width="118" height="78" rx="2"/>
+<text class="hltext name" x="751" y="314" text-anchor="middle">PMP control</text>
+<text class="hltext sub" x="751" y="332" text-anchor="middle">reprogrammed</text>
+<text class="hltext sub" x="751" y="346" text-anchor="middle">per switch</text>
 
-<!-- ── M-mode kernel ──────────────────────────────────────────── -->
-<rect class="band" x="20" y="430" width="860" height="168" rx="8" stroke-width="1"/>
-<text class="muted h" x="36" y="452">MACHINE MODE · KERNEL</text>
+<rect class="hl" x="822" y="282" width="118" height="78" rx="2"/>
+<text class="hltext name" x="881" y="314" text-anchor="middle">Boot checks</text>
+<text class="hltext sub" x="881" y="332" text-anchor="middle">capabilities,</text>
+<text class="hltext sub" x="881" y="346" text-anchor="middle">channels, layout</text>
 
-<rect class="kern" x="36" y="464" width="160" height="118" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="116" y="488" text-anchor="middle">Trap path</text>
-<text class="muted s" x="116" y="510" text-anchor="middle">per-task kernel stack</text>
-<text class="muted s" x="116" y="528" text-anchor="middle">switch = return another</text>
-<text class="muted s" x="116" y="546" text-anchor="middle">task's saved frame</text>
-<text class="muted s" x="116" y="568" text-anchor="middle">~600 instructions</text>
+<line class="rule" x1="20" y1="378" x2="940" y2="378" stroke-width="1"/>
 
-<rect class="kern" x="206" y="464" width="160" height="118" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="286" y="488" text-anchor="middle">Syscalls</text>
-<text class="muted s code" x="286" y="510" text-anchor="middle">yield sleep now</text>
-<text class="muted s code" x="286" y="528" text-anchor="middle">log send receive</text>
-<text class="muted s" x="286" y="550" text-anchor="middle">pointers checked against</text>
-<text class="muted s" x="286" y="568" text-anchor="middle">the caller's own memory</text>
+<!-- Hardware row -->
+<rect class="hw" x="170" y="394" width="770" height="50" rx="2"/>
+<line class="rule" x1="362" y1="394" x2="362" y2="444" stroke-width="1"/>
+<line class="rule" x1="555" y1="394" x2="555" y2="444" stroke-width="1"/>
+<line class="rule" x1="747" y1="394" x2="747" y2="444" stroke-width="1"/>
+<text class="fg" x="266" y="424" text-anchor="middle">CLINT timer, 1 ms</text>
+<text class="fg" x="458" y="424" text-anchor="middle">16550 UART</text>
+<text class="fg" x="651" y="424" text-anchor="middle">PMP, 16 entries</text>
+<text class="fg" x="843" y="424" text-anchor="middle">256 KB RAM, 512 KB flash</text>
 
-<rect class="kern" x="376" y="464" width="160" height="118" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="456" y="488" text-anchor="middle">Channels</text>
-<text class="muted s" x="456" y="510" text-anchor="middle">8 kernel-owned rings</text>
-<text class="muted s" x="456" y="528" text-anchor="middle">block when full / empty</text>
-<text class="muted s" x="456" y="550" text-anchor="middle">one sender, one receiver</text>
-<text class="muted s" x="456" y="568" text-anchor="middle">(checked at boot)</text>
-
-<rect class="kern" x="546" y="464" width="160" height="118" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="626" y="488" text-anchor="middle">CA-PIP scheduler</text>
-<text class="muted s" x="626" y="510" text-anchor="middle">effective priority =</text>
-<text class="muted s" x="626" y="528" text-anchor="middle">max(base, MIP)</text>
-<text class="muted s" x="626" y="550" text-anchor="middle">MIP read from table,</text>
-<text class="muted s" x="626" y="568" text-anchor="middle">no graph code at runtime</text>
-
-<rect class="kern" x="716" y="464" width="148" height="118" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="790" y="488" text-anchor="middle">PMP</text>
-<text class="muted s" x="790" y="510" text-anchor="middle">reprogrammed on</text>
-<text class="muted s" x="790" y="528" text-anchor="middle">every switch</text>
-<text class="muted s" x="790" y="550" text-anchor="middle">flash R+X,</text>
-<text class="muted s" x="790" y="568" text-anchor="middle">own region R+W</text>
-
-<!-- ── Hardware ──────────────────────────────────────────────── -->
-<rect class="band" x="20" y="612" width="860" height="72" rx="8" stroke-width="1"/>
-<text class="muted h" x="36" y="634">HARDWARE · QEMU virt, RV32IMAC</text>
-<rect class="hw" x="300" y="626" width="130" height="44" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="365" y="645" text-anchor="middle">CLINT</text>
-<text class="muted s" x="365" y="662" text-anchor="middle">1 ms tick</text>
-<rect class="hw" x="442" y="626" width="130" height="44" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="507" y="645" text-anchor="middle">UART</text>
-<text class="muted s" x="507" y="662" text-anchor="middle">16550 console</text>
-<rect class="hw" x="584" y="626" width="130" height="44" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="649" y="645" text-anchor="middle">PMP CSRs</text>
-<text class="muted s" x="649" y="662" text-anchor="middle">16 entries</text>
-<rect class="hw" x="726" y="626" width="138" height="44" rx="6" stroke-width="1.5"/>
-<text class="fg t" x="795" y="645" text-anchor="middle">RAM / flash</text>
-<text class="muted s" x="795" y="662" text-anchor="middle">256 KB / 512 KB</text>
+<!-- Legend -->
+<rect class="hl" x="170" y="468" width="12" height="12" rx="1"/>
+<text class="muted sub" x="188" y="478">FerretOS mechanism</text>
+<rect class="blk" x="330" y="468" width="12" height="12" rx="1"/>
+<text class="muted sub" x="348" y="478">conventional component</text>
+<rect class="region" x="510" y="468" width="12" height="12" rx="1" stroke-width="1.25"/>
+<text class="muted sub" x="528" y="478">hardware-enforced memory region</text>
 </svg>

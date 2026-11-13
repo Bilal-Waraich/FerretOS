@@ -1,57 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" height="250"
-     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 170" width="960" height="170"
+     font-family="Arial, Helvetica, sans-serif">
 <style>
-  .bg{fill:#ffffff} .fg{fill:#1f2328} .muted{fill:#59636e} .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  .s3{fill:#dafbe1;stroke:#1a7f37} .s2{fill:#ddf4ff;stroke:#0969da} .s1{fill:#fff1e5;stroke:#bc4c00}
-  .ch{fill:#f6f8fa;stroke:#8250df} .chtext{fill:#8250df}
-  .arrow{stroke:#59636e;fill:none} .head{fill:#59636e}
+  .bg{fill:#ffffff} .fg{fill:#1a1a1a} .muted{fill:#666666}
+  .blk{fill:#f2f2f2;stroke:#bfbfbf} .hl{fill:#76b900;stroke:#76b900} .hltext{fill:#000000}
+  .slot{fill:#ffffff;stroke:#808080} .slotfull{fill:#76b900;stroke:#808080}
+  .line{stroke:#808080;fill:none} .head{fill:#808080}
   @media (prefers-color-scheme: dark){
-    .bg{fill:#0d1117} .fg{fill:#e6edf3} .muted{fill:#9198a1}
-    .s3{fill:#0f3d1e;stroke:#3fb950} .s2{fill:#0c2d6b;stroke:#4493f8} .s1{fill:#3d1d00;stroke:#f0883e}
-    .ch{fill:#151b23;stroke:#ab7df8} .chtext{fill:#ab7df8}
-    .arrow{stroke:#9198a1} .head{fill:#9198a1}
+    .bg{fill:#0d1117} .fg{fill:#ededed} .muted{fill:#a0a0a0}
+    .blk{fill:#1c2128;stroke:#444c56} .slot{fill:#0d1117;stroke:#8b949e} .slotfull{stroke:#8b949e}
+    .line{stroke:#8b949e} .head{fill:#8b949e}
   }
-  text{font-size:13px} .t{font-weight:600;font-size:15px} .s{font-size:12px}
+  text{font-size:12px} .name{font-size:13px;font-weight:700} .sub{font-size:11px}
 </style>
 <defs>
-  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
     <path class="head" d="M0,0 L10,5 L0,10 z"/>
   </marker>
 </defs>
-<rect class="bg" width="900" height="250" rx="8"/>
-<text class="fg" x="20" y="30" font-size="16" font-weight="600">Sensor-fusion pipeline</text>
-<text class="muted" x="20" y="50" font-size="12">Data flows from high to low priority. Every message moves through a kernel channel; no task can touch another's memory.</text>
+<rect class="bg" width="960" height="170"/>
 
-<rect class="s3" x="20" y="76" width="210" height="104" rx="8" stroke-width="1.5"/>
-<text class="fg t" x="125" y="102" text-anchor="middle">sensor_reader</text>
-<text class="fg s" x="125" y="124" text-anchor="middle">priority 3 (highest)</text>
-<text class="muted s" x="125" y="143" text-anchor="middle">samples every 10 ms</text>
-<text class="muted s" x="125" y="162" text-anchor="middle">try_send: never blocks</text>
+<!-- sensor_reader (highest priority, highlighted) -->
+<rect class="hl" x="20" y="30" width="200" height="70" rx="2"/>
+<text class="hltext name" x="120" y="60" text-anchor="middle">sensor_reader</text>
+<text class="hltext sub" x="120" y="80" text-anchor="middle">priority 3</text>
+<text class="muted sub" x="120" y="122" text-anchor="middle">samples every 10 ms</text>
+<text class="muted sub" x="120" y="138" text-anchor="middle">non-blocking send</text>
 
-<rect class="ch" x="262" y="102" width="92" height="52" rx="26" stroke-width="1.5"/>
-<text class="chtext" x="308" y="124" text-anchor="middle" font-weight="600">ch 0</text>
-<text class="muted s" x="308" y="142" text-anchor="middle">8 × 16 B</text>
-<line class="arrow" x1="230" y1="128" x2="260" y2="128" stroke-width="1.5" marker-end="url(#a)"/>
-<line class="arrow" x1="354" y1="128" x2="384" y2="128" stroke-width="1.5" marker-end="url(#a)"/>
+<!-- channel 0: eight-slot queue -->
+<line class="line" x1="220" y1="65" x2="262" y2="65" stroke-width="1.25" marker-end="url(#a)"/>
+<g>
+  <rect class="slotfull" x="264" y="53" width="12" height="24"/>
+  <rect class="slotfull" x="276" y="53" width="12" height="24"/>
+  <rect class="slot" x="288" y="53" width="12" height="24"/>
+  <rect class="slot" x="300" y="53" width="12" height="24"/>
+  <rect class="slot" x="312" y="53" width="12" height="24"/>
+  <rect class="slot" x="324" y="53" width="12" height="24"/>
+  <rect class="slot" x="336" y="53" width="12" height="24"/>
+  <rect class="slot" x="348" y="53" width="12" height="24"/>
+</g>
+<text class="fg name" x="312" y="44" text-anchor="middle">channel 0</text>
+<text class="muted sub" x="312" y="96" text-anchor="middle">8 × 16 B, in kernel</text>
+<line class="line" x1="360" y1="65" x2="398" y2="65" stroke-width="1.25" marker-end="url(#a)"/>
 
-<rect class="s2" x="386" y="76" width="210" height="104" rx="8" stroke-width="1.5"/>
-<text class="fg t" x="491" y="102" text-anchor="middle">filter</text>
-<text class="fg s" x="491" y="124" text-anchor="middle">priority 2</text>
-<text class="muted s" x="491" y="143" text-anchor="middle">4-sample moving average</text>
-<text class="muted s" x="491" y="162" text-anchor="middle">blocks until data arrives</text>
+<!-- filter -->
+<rect class="blk" x="400" y="30" width="200" height="70" rx="2"/>
+<text class="fg name" x="500" y="60" text-anchor="middle">filter</text>
+<text class="muted sub" x="500" y="80" text-anchor="middle">priority 2</text>
+<text class="muted sub" x="500" y="122" text-anchor="middle">4-sample moving average</text>
+<text class="muted sub" x="500" y="138" text-anchor="middle">blocks until data arrives</text>
 
-<rect class="ch" x="628" y="102" width="92" height="52" rx="26" stroke-width="1.5"/>
-<text class="chtext" x="674" y="124" text-anchor="middle" font-weight="600">ch 1</text>
-<text class="muted s" x="674" y="142" text-anchor="middle">8 × 16 B</text>
-<line class="arrow" x1="596" y1="128" x2="626" y2="128" stroke-width="1.5" marker-end="url(#a)"/>
-<line class="arrow" x1="720" y1="128" x2="750" y2="128" stroke-width="1.5" marker-end="url(#a)"/>
+<!-- channel 1 -->
+<line class="line" x1="600" y1="65" x2="642" y2="65" stroke-width="1.25" marker-end="url(#a)"/>
+<g>
+  <rect class="slotfull" x="644" y="53" width="12" height="24"/>
+  <rect class="slotfull" x="656" y="53" width="12" height="24"/>
+  <rect class="slotfull" x="668" y="53" width="12" height="24"/>
+  <rect class="slot" x="680" y="53" width="12" height="24"/>
+  <rect class="slot" x="692" y="53" width="12" height="24"/>
+  <rect class="slot" x="704" y="53" width="12" height="24"/>
+  <rect class="slot" x="716" y="53" width="12" height="24"/>
+  <rect class="slot" x="728" y="53" width="12" height="24"/>
+</g>
+<text class="fg name" x="692" y="44" text-anchor="middle">channel 1</text>
+<text class="muted sub" x="692" y="96" text-anchor="middle">absorbs logger backlog</text>
+<line class="line" x1="740" y1="65" x2="758" y2="65" stroke-width="1.25" marker-end="url(#a)"/>
 
-<rect class="s1" x="752" y="76" width="128" height="104" rx="8" stroke-width="1.5"/>
-<text class="fg t" x="816" y="102" text-anchor="middle">uart_logger</text>
-<text class="fg s" x="816" y="124" text-anchor="middle">priority 1</text>
-<text class="muted s" x="816" y="143" text-anchor="middle">3 ms per line</text>
-<text class="muted s" x="816" y="162" text-anchor="middle">+25 ms every 5th</text>
-
-<text class="fg s" x="20" y="212" font-weight="600">What it shows</text>
-<text class="muted s" x="20" y="232">IPC under isolation (U-mode + PMP), and CA-PIP keeping the high-priority sensor on time while the logger is busy: 0 deadline misses, latency ≤ 1 tick.</text>
+<!-- uart_logger -->
+<rect class="blk" x="760" y="30" width="180" height="70" rx="2"/>
+<text class="fg name" x="850" y="60" text-anchor="middle">uart_logger</text>
+<text class="muted sub" x="850" y="80" text-anchor="middle">priority 1</text>
+<text class="muted sub" x="850" y="122" text-anchor="middle">3 ms per line, plus a</text>
+<text class="muted sub" x="850" y="138" text-anchor="middle">25 ms flush every 5 lines</text>
 </svg>
