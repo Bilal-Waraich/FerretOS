@@ -1,281 +1,254 @@
 # FerretOS
 
-![Build](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/build.yml/badge.svg)
-![Clippy](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/clippy.yml/badge.svg)
+[![Build & Boot](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/build.yml/badge.svg)](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/build.yml)
+[![Unit Tests](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/test.yml/badge.svg)](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/test.yml)
+[![Clippy](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/clippy.yml/badge.svg)](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/clippy.yml)
+[![Kani](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/kani.yml/badge.svg)](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/kani.yml)
+[![Lean](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/lean.yml/badge.svg)](https://github.com/Bilal-Waraich/FerretOS/actions/workflows/lean.yml)
 
-A `no_std` Rust microkernel for RISC-V systems with ≤256 KB RAM and no MMU. Memory safety is enforced by the type system. Priority inversion is structurally impossible via a proactive capability-aware scheduler.
+A `no_std` Rust microkernel for RISC-V systems with ≤ 256 KB RAM and no MMU. Tasks run in user mode, isolated by RISC-V PMP, and talk over capability-checked channels. The scheduler makes priority inversion over shared peripherals impossible by construction: priorities are fixed at build time from a contention graph, not adjusted at run time.
 
 ---
 
-## What is FerretOS?
+## Demo: a sensor-fusion pipeline
 
-Most embedded RTOSes are written in C. Most memory-safe kernels are too large for constrained hardware. FerretOS targets the gap: a microkernel where the Rust type system enforces memory isolation at compile time, and the scheduler eliminates priority inversion by construction rather than by detection.
+<img src="docs/figures/pipeline.svg" alt="Pipeline: sensor_reader (priority 3) sends on channel 0 to filter (priority 2), which sends on channel 1 to uart_logger (priority 1)" width="900"/>
 
-Two technical contributions drive the design:
+Three user-mode tasks, each confined by PMP to its own 4 KB region, pass readings through kernel-owned channels. The logger is deliberately slow: 3 ms per line, plus a 25 ms flush every fifth line, longer than the sensor's 10 ms period. The sensor has the highest priority, so it preempts the logger in the middle of a flush and stays on time.
 
-**Capability system.** Hardware peripherals are represented as zero-sized types (ZSTs). Exclusive ownership is enforced at compile time with zero runtime cost. A boot-time conflict detector validates the capability declarations of all registered tasks before any task runs, halting with a diagnostic if two tasks claim the same exclusive peripheral.
+<img src="docs/figures/pipeline_timeline.svg" alt="Timeline from a QEMU run: the sensor runs every 10 ticks, including at ticks 50, 60, 100 and 110 while the logger is in the middle of a 25-tick flush" width="900"/>
 
-**CA-PIP scheduler.** At boot, the kernel constructs a Capability Contention Graph (CCG) from the static task registry. An edge L → H in the CCG means task L holds a peripheral that task H requires. For each task, the kernel computes `MaxInheritedPriority` — the highest base priority of any task reachable from it via BFS over the CCG — and stores it in the task descriptor. The scheduler's preemption decision is then:
+The timeline above is drawn from a real QEMU run by [`scripts/plot_timeline.py`](scripts/plot_timeline.py). Serial output from the same run:
 
 ```
-effective_priority(T) = max(T.base_priority, T.max_inherited_priority)
+Capability check passed.
+Channel check passed.
+Task registry:
+  task 0  base_pri=3  mip=3  eff_pri=3  excl_caps=0x00000002  req_caps=0x00000000  mem=[0x800b8000, 0x800b9000)
+  task 1  base_pri=2  mip=2  eff_pri=2  excl_caps=0x00000000  req_caps=0x00000000  mem=[0x800b9000, 0x800ba000)
+  task 2  base_pri=1  mip=1  eff_pri=1  excl_caps=0x00000001  req_caps=0x00000000  mem=[0x800ba000, 0x800bb000)
+  task 3  base_pri=0  mip=0  eff_pri=0  excl_caps=0x00000000  req_caps=0x00000000  mem=[0x00000000, 0x00000000)
+Interrupts enabled. Starting tasks.
+[KERNEL] task 0 running in U-mode
+[KERNEL] task 1 running in U-mode
+[probe] log of kernel memory rejected (EFAULT)
+[KERNEL] task 2 running in U-mode
+[LOG] t=43 seq=4 release=40 raw=117 avg=75 latency=0 misses=0 dropped=0
+[LOG] flush start=43 end=68
+[LOG] t=71 seq=5 release=50 raw=166 avg=109 latency=0 misses=0 dropped=0
+[LOG] t=74 seq=6 release=60 raw=199 avg=142 latency=0 misses=0 dropped=0
+...
+[LOG] summary: samples=100 max_latency=0 misses=0 dropped=0
 ```
 
-This value is constant for the system's lifetime. Priority inversion is structurally impossible: a holder's effective priority is always at least as high as every waiter's priority, so it cannot be preempted by a waiter. No graph traversal occurs at runtime — the preemption check is two integer comparisons.
+Samples 5 and 6 were released at ticks 50 and 60, inside the flush, and still ran with latency 0. The logger prints them late, from the channel backlog, which is exactly what the channels are for. `task 3` is the kernel's idle task. The `[probe]` line shows the kernel refusing a task's request to print kernel memory.
 
-For full design rationale, algorithm proofs, and ecosystem positioning, see [FERRET.md](FERRET.md).
-
----
-
-## Status
-
-| Sprint | Theme | Status |
-|--------|-------|--------|
-| 0 | Toolchain + QEMU boot | ✅ Complete |
-| 1 | Interrupts + context switch | ✅ Complete |
-| 2 | Memory safety layer | ✅ Complete |
-| 3 | Capability system | ✅ Complete |
-| 4 | CA-PIP scheduler | ✅ Complete |
-| 5 | OML integration | ✅ Complete |
-| 6 | Polish + demo | 🔲 Pending |
-
----
-
-## Target Platform
-
-| Property | Value |
-|----------|-------|
-| ISA | RISC-V RV32IMAC |
-| RAM | ≤ 256 KB |
-| Flash | ≤ 512 KB |
-| MMU | None |
-| Emulator | QEMU `virt` (riscv32) |
-| Rust target | `riscv32imac-unknown-none-elf` |
-| Toolchain | `nightly-2024-12-01` (pinned via `rust-toolchain.toml`) |
+The original three-task CA-PIP demo (L/M/H, where L inherits H's priority) is still available with `--features demo-hml`; see [Build and run](#build-and-run).
 
 ---
 
 ## Architecture
 
-<img src="docs/figures/architecture.svg" alt="FerretOS three-layer architecture diagram" width="640"/>
+<img src="docs/figures/architecture.svg" alt="FerretOS architecture: build-time OML and CCG generation; user-mode tasks inside PMP regions; machine-mode kernel with trap path, syscalls, channels, CA-PIP scheduler and PMP; QEMU virt hardware" width="900"/>
+
+**Capabilities.** Peripherals are zero-sized types (`ExclusiveCapability<UartCapability<0>>`), so ownership is checked by the compiler and costs nothing at run time. Each task's declaration also carries bitmasks of what it holds, needs, and which channel ends it owns. At boot the kernel halts with a diagnostic if two tasks claim the same exclusive peripheral or the same channel endpoint.
+
+**CA-PIP scheduling.** At build time, `build.rs` builds a Capability Contention Graph from the OML declarations. An edge L → H means L holds a peripheral H needs. For each task it computes `MaxInheritedPriority`: the highest priority reachable in the graph. The kernel schedules on
 
 ```
-Boot sequence:
-  1. UART init + memory map print
-  2. Task registration (TaskDescriptor array, static stacks)
-  3. Capability conflict detection (halts on exclusive cap clash)
-  4. CCG construction from task registry
-  5. MaxInheritedPriority computed via BFS, written to each TaskDescriptor
-  6. Ready queue populated; highest effective-priority task selected
-  7. CLINT timer armed; machine-mode interrupts enabled
-  8. Timer ISR fires every 1 ms → preemption check → context switch if needed
-
-Kernel modules:
-  memory/
-    region.rs   — MemoryRegion<START, END>: ZST with compile-time non-overlap check
-    stack.rs    — Stack<N>: 16-byte aligned, statically allocated
-    task.rs     — TaskDescriptor, TaskState, TASK_REGISTRY, register_task()
-
-  capability/
-    types.rs    — UartCapability<N>, GpioCapability<PIN>, SpiCapability<N>, I2cCapability<N>
-    wrappers.rs — ExclusiveCapability<T> (non-Clone), SharedCapability<T> (Clone)
-    allocator.rs — check_capability_conflicts(): boot-time scan, halt on conflict
-
-  scheduler/
-    ccg.rs      — CapabilityContentionGraph::build(): O(N²) from exclusive/required masks
-    mip.rs      — compute_and_store_mip(): BFS from each task, writes MIP to registry
-    queue.rs    — PriorityQueue<N>: static max-heap, O(log N) insert/pop
-    mod.rs      — init(), tick(): preemption check + round-robin tie-breaking
-
-  context/
-    mod.rs      — TrapFrame: 32 GPRs + mepc/mstatus/mcause/mtval (#[repr(C)])
-    switch.rs   — __context_switch: saves/restores callee-saved regs + CSRs
-    trap.rs     — __trap_entry: full register save, timer ISR dispatch
-
-  clint.rs      — get_mtime(), set_mtimecmp(), schedule_tick(), TICK_CYCLES = 10_000
-  uart.rs       — 16550 MMIO driver (0x1000_0000)
-  config.rs     — MAX_TASKS = 16, MAX_PERIPHERALS = 32
+effective_priority(T) = max(T.base_priority, MaxInheritedPriority(T))
 ```
 
-### CA-PIP 3-Task Demo (Sprint 4)
+which never changes at run time. A task holding a peripheral always runs at least as high as any task waiting for it, so a middle-priority task cannot get in between. The kernel binary contains no graph code; it copies a precomputed table at boot.
 
-The boot sequence registers three tasks that demonstrate the CA-PIP guarantee:
+**Isolation.** Tasks run in U-mode. On every context switch the kernel reprograms PMP so the running task can read and execute flash and read and write its own 4 KB region, and nothing else: no kernel RAM, no other task, no MMIO. Traps land on a per-task kernel stack, and syscalls check every pointer against the caller's own memory before touching it.
 
-| Task | Base Priority | Role |
-|------|--------------|------|
-| L (id=0) | 1 | Holds UART0 exclusively; does slow work |
-| M (id=1) | 2 | CPU-bound; no capability contention |
-| H (id=2) | 3 | Requires UART0; prints timestamps |
+**IPC.** Tasks share no memory, so channels live in the kernel: each is a ring of eight 16-byte messages. `send` blocks while the channel is full and `receive` while it is empty. When a send wakes a higher-priority receiver, the receiver runs immediately rather than at the next timer tick.
 
-CCG has one edge: L → H (L holds UART0, H requires it).
-
-`MIP(L) = priority(H) = 3`, so `effective_priority(L) = max(1, 3) = 3`.
-
-L cannot be preempted by M (eff_pri 3 > M.base_priority 2). H runs as soon as L releases UART0. M cannot delay H via L.
+Design rationale and proofs: [FERRET.md](FERRET.md). Roadmap: [FerretEvolution.md](FerretEvolution.md). Implementation notes and measurements: [docs/internals.md](docs/internals.md).
 
 ---
 
-## Prerequisites
+## Status
 
-- **Rust nightly** — managed automatically by `rustup` via `rust-toolchain.toml`
-- **QEMU with RISC-V support**
+| Phase | Sprint | Theme | Status |
+|---|---|---|---|
+| I | 0–5 | Boot, interrupts, memory regions, capabilities, CA-PIP, OML | ✅ v0.1.0 |
+| I | 6 | Polish and demo | 🟡 H/M/L demo recording (#56) open |
+| II | 7 | Graph computed at build time, out of the kernel binary | ✅ |
+| II | 8 | U-mode tasks, syscall validation, per-task PMP, PMP fault test | ✅ |
+| II | 9 | Capability-checked blocking channels | ✅ |
+| II | 10 | Sensor-fusion pipeline ✅ · README ✅ · threat model (#80), recording (#92) | 🟡 |
+| II | 11 | Lean: no-inversion theorem ✅ · scheduler step model (#90), SRP corollary (#81) | 🟡 |
+| III | 12 | RV32IMC portability, ESP32-C3 in emulation | 🔲 |
+| III | 13 | Execution-time tracing and deadline checks in CI | 🔲 |
+
+Phase III is emulation-only: there is no physical board in this project, and nothing is claimed as validated on silicon.
+
+---
+
+## Build and run
+
+### Prerequisites
+
+- **Rust**: `rustup` installs the pinned nightly automatically from `rust-toolchain.toml`.
+- **QEMU with RISC-V**:
   ```bash
-  brew install qemu          # macOS
-  apt-get install qemu-system-misc  # Debian/Ubuntu
+  brew install qemu                      # macOS
+  sudo apt-get install qemu-system-riscv # Debian/Ubuntu (qemu-system-misc on older releases)
   ```
-
-### Cloning
-
-The OML transpiler is included as a git submodule at `oml/`. Clone with:
 
 ```bash
 git clone --recurse-submodules https://github.com/Bilal-Waraich/FerretOS
-
-# Or if you already cloned without submodules:
-git submodule update --init
+cd FerretOS
 ```
 
----
-
-## Build and Run
+### Run
 
 ```bash
-# Build release binary
 cargo build --release
+./scripts/run_qemu.sh                      # sensor pipeline; Ctrl-A X to exit
 
-# Run in QEMU
-./scripts/run_qemu.sh
-# Press Ctrl-A X to exit QEMU
+cargo build --release --features demo-hml
+./scripts/run_qemu.sh                      # original L/M/H CA-PIP demo
 
-# Check binary fits within flash and RAM budgets
-./scripts/size_report.sh
-
-# Lint (zero-warning policy)
-cargo clippy -- -D warnings
+cargo build --release --features pmp
+./scripts/run_qemu.sh                      # pipeline with per-task PMP isolation
 ```
 
-### Expected boot output
+Without `pmp`, tasks still run in U-mode but PMP grants them the whole address space. Enable `pmp` to get isolation; CI runs both builds.
 
-```
-====================================
-  Ferret booting...
-====================================
-FerretOS v0.1.0 — Sprint 5 (OML integration)
-Target : riscv32imac-unknown-none-elf
-Machine: QEMU virt
-Memory map:
-  .text start : 0x80000000
-  ...
-Task registry:
-  task 0  base_pri=1  mip=3  eff_pri=3  excl_caps=0x1  req_caps=0x0  mem=[0x80081000, 0x80082000)
-  task 1  base_pri=2  mip=0  eff_pri=2  excl_caps=0x0  req_caps=0x0  mem=[0x80082000, 0x80083000)
-  task 2  base_pri=3  mip=0  eff_pri=3  excl_caps=0x0  req_caps=0x1  mem=[0x80083000, 0x80084000)
-Scheduler initialised.
-Interrupts enabled. Running demo.
-[TICK 1]
-counter: 100000
-[TICK 2]
-...
-```
-
-Task L's `eff_pri=3` in the registry output confirms that MIP inheritance is working correctly.
-
----
-
-## Debug (GDB)
+### Test
 
 ```bash
-# Terminal 1 — start QEMU with GDB stub
-./scripts/run_qemu.sh --gdb
+./scripts/host_test.sh                     # unit tests on the host (default + pmp)
 
-# Terminal 2 — attach GDB
-./scripts/gdb_attach.sh
+cargo build --release
+bash tests/integration/boot_test.sh        # boot + pipeline timing checks
+
+cargo build --release --features demo-hml
+bash tests/integration/boot_test.sh hml    # L/M/H priority-inheritance ordering
+
+bash tests/integration/pmp_fault_test.sh   # rogue store traps with PMP, lands without
+bash scripts/switch_latency.sh             # context-switch cost, default vs pmp
+./scripts/size_report.sh                   # flash/RAM budgets
+
+cargo clippy -- -D warnings
+(cd kernel && cargo kani --default-unwind 17 -Z unstable-options --ignore-global-asm)
+(cd lean && lake exe cache get && lake build)
 ```
 
----
+To regenerate the timeline figure: `cargo build --release && python3 scripts/plot_timeline.py`. To debug with GDB, run `./scripts/run_qemu.sh --gdb` in one terminal and `./scripts/gdb_attach.sh` in another.
 
-## Design Decisions
-
-### Why no heap
-
-All kernel data structures are statically allocated at link time. `MAX_TASKS` and `MAX_PERIPHERALS` are `const` values in `config.rs` that bound every fixed-size array in the kernel. No `alloc` crate, no `Box`, no `Vec`. This eliminates allocator bugs, heap fragmentation, and OOM conditions at runtime — and makes Worst-Case Execution Time (WCET) analysis tractable.
-
-### Why ZST capabilities
-
-Zero-sized types impose capability constraints at the type level with zero runtime cost. `size_of::<ExclusiveCapability<T>>() == 0` for any `T`. Rust's move semantics make it impossible to hand the same `ExclusiveCapability` instance to two tasks. The boot-time conflict detector validates the bitmask representation of these declarations before any task runs.
-
-### Why CCG over per-resource ceilings
-
-SRP (used by RTIC) asks "what is the ceiling of this resource?" CA-PIP asks "what is the maximum priority of any task reachable from this task via the full contention graph?" For non-overlapping resource graphs (typical on constrained targets) the answers converge. CA-PIP's BFS over the CCG catches multi-hop dependency chains that per-resource ceilings miss. See [FERRET.md §CA-PIP and SRP](FERRET.md#ca-pip-and-srp-mathematical-relationship) for the formal relationship.
-
-### `required_cap_mask` vs. `exclusive_cap_mask`
-
-These two bitmask fields are distinct by design. `exclusive_cap_mask` means "this task currently holds this peripheral." `required_cap_mask` means "this task needs this peripheral to proceed." CCG edges are built from `L.exclusive & H.required != 0`, not from two tasks sharing the same exclusive bit. This keeps the boot-time conflict detector (which halts on double-exclusive-claim) and the CCG builder (which models holder–waiter relationships) from interfering.
+To change the task set, edit `tasks/*.oml`. Building with the OML transpiler present (`./scripts/build_oml.sh`) regenerates `kernel/src/generated/` and the priority tables. The generated files are committed, so the kernel builds without OML.
 
 ---
 
-## Ecosystem Position
+## How it is checked
 
-| | **FerretOS** | RTIC | Hubris | Tock OS |
+| Check | What it establishes | Where |
+|---|---|---|
+| Unit tests | Scheduler queue, build-time graph generator (cross-checked against the in-kernel algorithm), PMP encoding, syscall validation, channel block/wake | `scripts/host_test.sh` |
+| Boot test | Tasks run in U-mode; the pipeline has 0 misses and 0 drops with latency ≤ 1 tick, including samples released inside logger flushes | `tests/integration/boot_test.sh` |
+| H/M/L ordering | No M or H run starts inside L's critical section | `boot_test.sh hml` |
+| PMP fault test | A U-mode store to kernel memory raises a store access fault with PMP and succeeds without it | `tests/integration/pmp_fault_test.sh` |
+| Kani | Graph construction is in bounds; conflict detectors always catch a double claim; the priority queue keeps heap order; channel rings never exceed capacity and are FIFO with no loss or duplication | `kernel/src/kani_proofs.rs` |
+| Lean 4 | If a holder blocks a waiter in the contention graph, the holder's inherited priority is at least the waiter's | `lean/FerretOS/` |
+
+All of these run in CI on every push and pull request. CI also fails if the committed generated files differ from what OML produces.
+
+### Measurements (QEMU, `-icount`)
+
+| | Default | `pmp` |
+|---|---|---|
+| Context switch, average | 587 instructions | 631 instructions |
+| Context switch, worst case | 817 instructions | 861 instructions |
+| Flash / RAM used | 18 KB / 32 KB | — |
+
+The budget is 1,000 cycles per switch. QEMU is not cycle-accurate, so switch cost is counted in retired instructions, which roughly track cycles on a simple in-order core. It is a proxy, not a cycle measurement.
+
+---
+
+## Limitations
+
+- **Emulation only.** Everything runs on QEMU `virt`; timing figures are instruction counts, not cycles.
+- **Channel waits do not raise priorities.** Only peripheral contention feeds the CCG. A high-priority task blocked on a full channel waits for its lower-priority consumer, and a middle-priority task can delay that consumer. The pipeline avoids this by sending downhill with `try_send`. See [docs/internals.md](docs/internals.md#blocking-channels--issues-76-77-).
+- **Static system.** No dynamic tasks, no capability delegation or revocation. The firmware image is trusted as a whole.
+- **The Lean proof covers the model, not the Rust code.** The Rust implementation is cross-checked against the model by unit tests and Kani, not proved equal to it.
+- **PMP is opt-in** (`--features pmp`). The default build runs tasks in U-mode but grants them all memory.
+
+---
+
+## Design decisions
+
+**No heap.** Every kernel structure is statically sized by `MAX_TASKS`, `MAX_PERIPHERALS` and `MAX_CHANNELS` in `config.rs`. Nothing can run out of memory at run time, and execution time stays bounded, which keeps worst-case analysis tractable.
+
+**Priorities at build time.** Every input to the contention graph is known at compile time, so `build.rs` computes the priorities on the host, and its generator is unit-tested like kernel code. Moving it out cost no ROM, because LTO had already removed the unused boot-time code, but it removes any chance of the graph code running on the target.
+
+**Kernel stacks, not task stacks, for traps.** M-mode stores bypass PMP. Saving a trap frame at a task-chosen stack pointer would let a task direct kernel writes anywhere, so each task gets a small kernel stack instead.
+
+**Copying channels.** With per-task PMP there is no memory two tasks can both touch, so channels copy messages through the kernel. Messages are small (16 bytes) and the copy is bounded.
+
+**`required_cap_mask` vs `exclusive_cap_mask`.** "Holds" and "needs" are separate masks. Graph edges come from `L.exclusive & H.required`, so the double-claim detector and the contention graph never conflict.
+
+---
+
+## Ecosystem position
+
+| | **FerretOS** | RTIC | Hubris | Tock |
 |---|---|---|---|---|
-| Language | Rust | Rust | Rust | Rust |
 | Model | Microkernel | Concurrency framework | Microkernel | Kernel + processes |
-| Memory isolation | Rust type system | Rust lifetimes | ARM MPU | ARM MPU |
-| Scheduling | CA-PIP (proactive CCG) | SRP (compile-time ceilings) | Fixed / synchronous | Preemptive |
-| Priority inversion | Structurally impossible | Structurally impossible | N/A | Runtime mitigation |
-| Task configuration | OML DSL (Sprint 5) | Rust proc-macros | Static config | Dynamic sideloading |
-| RAM target | ≤ 256 KB | Zero-cost | ~2000 LOC kernel | ~64 KB |
-| MMU required | No | No | No | No |
+| Isolation | Rust types + RISC-V PMP | Rust lifetimes | ARM MPU | ARM MPU / RISC-V PMP |
+| Scheduling | CA-PIP (build-time contention graph) | SRP (compile-time ceilings) | Fixed priority, synchronous IPC | Round-robin / priority |
+| Priority inversion | Prevented by construction (peripherals) | Prevented by construction | Avoided by IPC design | — |
+| Task configuration | OML DSL | Rust proc-macros | Static TOML | Dynamic loading |
+| Verification | Kani + Lean model | — | — | — |
 
-**FerretOS vs. RTIC** — closest technical sibling. Both are proactive, both use static resource declarations. RTIC is a concurrency framework built on bare-metal ISRs; FerretOS adds a full microkernel abstraction with explicit task lifecycle, typed memory regions, and a hardware-agnostic capability layer.
-
-**FerretOS vs. Hubris** — both reject dynamic task creation and operate on a fully static system image. Hubris mandates ARM MPU for isolation; FerretOS targets hardware that may lack MPU capabilities entirely, with RISC-V PMP as an optional hardening layer.
+RTIC is the closest relative: both are static and both prevent inversion by construction. FerretOS adds a microkernel boundary, with user-mode tasks, PMP isolation, syscalls and channels, around the same idea. For SRP's resource ceilings and how they relate to CA-PIP, see [FERRET.md](FERRET.md#ca-pip-and-srp-mathematical-relationship).
 
 ---
 
-## Repository Layout
+## Repository layout
 
 ```
 FerretOS/
-├── kernel/src/
-│   ├── main.rs           — boot sequence, OML-generated task registration
-│   ├── config.rs         — MAX_TASKS, MAX_PERIPHERALS
-│   ├── generated/        — OML transpiler output (committed; no OML required to build)
-│   │   ├── task_schema.rs — TaskConfig struct generated from task.oml
-│   │   ├── demo_tasks.rs  — TASK_L/M/H statics generated from demo_tasks.oml
-│   │   └── bridge.rs      — TaskConfig::into_descriptor (hand-written bridge)
-│   ├── memory/           — MemoryRegion, Stack, TaskDescriptor, TASK_REGISTRY
-│   ├── capability/       — ZST types, wrappers, boot-time conflict detector
-│   ├── scheduler/        — CCG, MIP, PriorityQueue, preemption logic
-│   ├── context/          — TrapFrame, __context_switch, __trap_entry
-│   ├── clint.rs          — CLINT timer driver
-│   └── uart.rs           — 16550 UART driver
-├── tasks/
-│   ├── task.oml          — TaskConfig schema (struct + Peripheral enum)
-│   └── demo_tasks.oml    — TASK_L, TASK_M, TASK_H instance declarations
-├── oml/                  — OML transpiler submodule (pinned commit)
-├── linker/ferret.ld      — FLASH @ 0x8000_0000 / RAM @ 0x8008_0000
-├── scripts/
-│   ├── run_qemu.sh       — launch QEMU (--gdb adds GDB stub)
-│   ├── size_report.sh    — assert .text+.rodata ≤ 512 KB, .data+.bss ≤ 256 KB
-│   └── gdb_attach.sh     — attach riscv32-unknown-elf-gdb to QEMU
-├── FERRET.md             — full design document, algorithm proofs, ecosystem analysis
-├── CLAUDE.md             — contributor and AI assistant workflow guide
-└── rust-toolchain.toml   — pinned nightly-2024-12-01
+├── kernel/
+│   ├── build.rs              — OML regeneration, build-time CCG + MIP tables
+│   ├── build/ccg_gen.rs      — graph generator (shared with host unit tests)
+│   ├── memory.x              — flash, kernel RAM, task RAM (TASKRAM) regions
+│   └── src/
+│       ├── lib.rs            — the `ferret` kernel library (host-testable)
+│       ├── main.rs, boot.rs  — RISC-V entry point and boot sequence
+│       ├── demo/             — pipeline.rs (default), hml.rs (--features demo-hml)
+│       ├── context/          — trap frame, trap entry/exit, per-task kernel stacks
+│       ├── scheduler/        — CA-PIP dispatch, ready queue, block/wake
+│       ├── syscall.rs, sys.rs — kernel and task sides of the syscall ABI
+│       ├── ipc/              — channel ring buffer, kernel channel table
+│       ├── memory/           — regions, stacks + canaries, task registry, PMP
+│       ├── capability/       — ZST capabilities, boot-time conflict detectors
+│       ├── generated/        — committed OML output and MIP tables
+│       └── kani_proofs.rs    — Kani harnesses
+├── tasks/                    — task.oml (schema), pipeline_tasks.oml, demo_tasks.oml
+├── lean/                     — Lean 4 model and proofs
+├── oml/                      — OML transpiler (submodule)
+├── tests/integration/        — boot_test.sh, pmp_fault_test.sh
+├── scripts/                  — run_qemu, host_test, size_report, switch_latency, plot_timeline, build_oml
+├── docs/                     — internals, algorithm, OML schema, figures
+├── FERRET.md                 — Phase I design and proofs
+└── FerretEvolution.md        — Phase II/III roadmap
 ```
 
 ---
 
-## Known Authoritative Constants
+## Constants (QEMU `virt`)
 
-| Constant | Value |
-|----------|-------|
-| UART base | `0x1000_0000` |
-| CLINT base | `0x0200_0000` |
-| `mtimecmp` | `0x0200_4000` |
-| Flash origin | `0x8000_0000` |
-| RAM origin | `0x8008_0000` |
-| Timer tick | 1 ms (TICK_CYCLES = 10,000 at 10 MHz) |
-| Time quantum | 5 ticks (5 ms) |
-| Stack alignment | 16 bytes (RISC-V ABI) |
-| Context switch budget | ≤ 1,000 cycles (logged and warned if exceeded) |
+| | |
+|---|---|
+| Flash | `0x8000_0000`, 512 KB |
+| Kernel RAM | `0x8008_0000`, 224 KB |
+| Task RAM | `0x800B_8000`, 32 KB (4 KB per task) |
+| UART | `0x1000_0000` |
+| CLINT | `0x0200_0000` (`mtimecmp` `0x0200_4000`) |
+| Timer tick | 1 ms |
+| Time quantum | 5 ticks |
+| `MAX_TASKS` / `MAX_CHANNELS` | 16 / 8 |
