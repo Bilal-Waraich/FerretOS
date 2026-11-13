@@ -55,12 +55,18 @@ jobs:
             ${{ env.CACHE_VERSION }}-cargo-${{ env.TARGET }}-
 
       # 4. Install QEMU for RISC-V.  We use the system package rather than
-      #    building from source to keep CI fast.  qemu-system-misc provides
-      #    qemu-system-riscv32 on Ubuntu.
+      #    building from source to keep CI fast.  Newer Ubuntu images (QEMU
+      #    10+) ship qemu-system-riscv32 in qemu-system-riscv; older ones in
+      #    qemu-system-misc.  Fail here, not in the boot test, if it is missing.
       - name: Install QEMU (RISC-V)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y qemu-system-misc
+          if apt-cache show qemu-system-riscv >/dev/null 2>&1; then
+            sudo apt-get install -y qemu-system-riscv
+          else
+            sudo apt-get install -y qemu-system-misc
+          fi
+          qemu-system-riscv32 --version
 
       # 5a. Build the pinned OML transpiler from the submodule so that the
       #     kernel build regenerates src/generated/ from tasks/*.oml.
