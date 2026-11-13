@@ -46,7 +46,7 @@ if ! command -v qemu-system-riscv32 &>/dev/null; then
     echo "" >&2
     echo "Install it with one of:" >&2
     echo "  macOS  : brew install qemu" >&2
-    echo "  Debian : sudo apt-get install qemu-system-misc" >&2
+    echo "  Debian : sudo apt-get install qemu-system-riscv   (qemu-system-misc on older releases)" >&2
     echo "  Fedora : sudo dnf install qemu-system-riscv" >&2
     exit 1
 fi

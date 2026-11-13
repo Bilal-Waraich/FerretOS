@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — Phase II
+
+### Kernel
+- Tasks actually run: timer-driven preemptive context switching, an idle task, and an `ecall` syscall ABI (`yield`, `sleep`, `log`, `now`, `send`, `receive`) (#103).
+- Tasks run in U-mode; traps use a per-task kernel stack (#85). Syscall pointers are validated against the caller's own memory, and logging requires a console capability (#86).
+- Per-task PMP isolation behind `--features pmp`: flash R+X and the running task's 4 KB region R+W, reprogrammed on every switch (#87). Task regions are linker sections in a dedicated TASKRAM area.
+- Capability-checked blocking channels in the kernel; a woken higher-priority receiver preempts immediately (#76, #77).
+- The contention graph and MIP are computed at build time; the graph code is compiled out of the kernel binary (#42, #84).
+
+### Demo
+- Sensor-fusion pipeline (`sensor_reader` → `filter` → `uart_logger`) is the default demo. The L/M/H demo is behind `--features demo-hml` (#79).
+
+### Verification and tooling
+- Kernel unit tests run on the host (#102), including tests for the build-time graph generator (#83) and channel block/wake.
+- Kani harnesses for the channel ring buffer and channel-endpoint detector (#78).
+- Integration tests: pipeline timing, PMP violation trap (#89), and context-switch latency with and without PMP (#88).
+- OML regenerates every task file; CI fails on drift (#104).
+
+### Docs
+- README rewritten around the pipeline, with new architecture, pipeline and timeline figures that adapt to light and dark themes (#93).
+- Phase III rescoped to emulation-only (#82).
+
 ## v0.1.0 — 2026-06-16
 
 Initial public release. FerretOS is a `no_std` Rust microkernel for RISC-V systems with ≤256 KB RAM and no MMU, demonstrating the CA-PIP priority inversion prevention algorithm.
